@@ -2070,4 +2070,23 @@ describe('Crew & Bot session integration', () => {
       await memory.close()
     }
   })
+
+  it('yields an error event instead of throwing when initial turn persistence fails', async () => {
+    const provider = new CapturingProvider()
+    const streamSpy = vi.spyOn(provider, 'stream')
+    const { session, store, memory } = await sessionWith(provider)
+    vi.spyOn(store, 'save').mockRejectedValue(new Error('session store write refused'))
+    try {
+      const events: AgentEvent[] = []
+      for await (const event of session.send('hello')) {
+        events.push(event)
+      }
+      expect(events).toEqual([
+        { type: 'error', message: 'session store write refused' },
+      ])
+      expect(streamSpy).not.toHaveBeenCalled()
+    } finally {
+      await memory.close()
+    }
+  })
 })

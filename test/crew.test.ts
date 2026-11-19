@@ -197,5 +197,100 @@ describe('Crew', () => {
       stopRequestedAt: expect.any(Number),
       guidance: [{ text: 'Focus on tests' }],
     })
+
+    expect((await crewTool.execute({ action: 'remove', id: bot.id }, { ...ctx, crew })).isError).toBe(true)
+    await crew.finish(bot.id, assignment.id, 'interrupted', 'Stopped')
+    expect(await crewTool.execute({ action: 'remove', id: bot.id }, { ...ctx, crew })).toEqual({
+      content: `Removed bot Sage (${bot.id}).`,
+    })
+    expect(crew.list()).toEqual([])
+    expect((await crewTool.execute({ action: 'remove', id: 'missing' }, { ...ctx, crew })).isError).toBe(true)
+  })
+
+  it('removes an idle or dead-PID bot and refuses removing a running or unknown bot', async () => {
+    const { crew, file } = store()
+    const running = await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
+    await expect(crew.remove(running.bot.id)).rejects.toThrow('still working')
+    await expect(crew.remove('missing')).rejects.toThrow('No bot has that id.')
+
+    await crew.finish(running.bot.id, running.assignment.id, 'completed', 'Done')
+    const removed = await crew.remove(running.bot.id)
+    expect(removed.name).toBe('Scout')
+    expect(crew.list()).toEqual([])
+    expect(new CrewStore(file).list()).toEqual([])
+
+    writeFileSync(file, JSON.stringify([{ id: 'orphan', name: 'Orphan', createdAt: 1, assignments: [{
+      id: 'a', sessionId: 's', mission: 'Hang', model: 'm', state: 'running', startedAt: 1, processId: 999_999_999,
+    }] }]))
+    expect((await crew.remove('orphan')).id).toBe('orphan')
+    expect(crew.list()).toEqual([])
+  })
+
+  it('creates bots with unique handles and instructions before any mission and preserves legacy bots', async () => {
+    const { crew, file } = store()
+    const legacy = [{
+      id: 'legacy-1',
+      name: 'Scout',
+      createdAt: 100,
+      avatar: { shape: 'gem', eyes: 'spark', accessory: 'crown', palette: 'ocean' },
+      assignments: [{ id: 'a1', sessionId: 's1', mission: 'Old mission', model: 'm1', state: 'completed', startedAt: 101 }],
+    }]
+    writeFileSync(file, JSON.stringify(legacy))
+
+    const existing = crew.get('legacy-1')
+    expect(existing).toMatchObject({
+      id: 'legacy-1',
+      name: 'Scout',
+      handle: 'scout',
+      avatar: { shape: 'gem', eyes: 'spark', accessory: 'crown', palette: 'ocean' },
+    })
+
+    const comunista = await crew.create({
+      name: 'Comunista',
+      instructions: 'Analyze policies from a Marxist socialist perspective.',
+    })
+    const capitalista = await crew.create({
+      name: 'Capitalista',
+      handle: 'capitalista',
+      instructions: 'Defend free markets and price signals.',
+    })
+
+    expect(comunista.handle).toBe('comunista')
+    expect(comunista.assignments).toEqual([])
+    expect(capitalista.handle).toBe('capitalista')
+
+    // Renaming display name keeps the explicit/frozen mention handle intact and updates instructions.
+    const renamed = await crew.updateProfile(comunista.id, {
+      name: 'Comunista Ortodoxo',
+      instructions: 'Stay concise and emphasize social planning.',
+    })
+    expect(renamed.name).toBe('Comunista Ortodoxo')
+    expect(renamed.handle).toBe('comunista')
+    expect(renamed.instructions).toBe('Stay concise and emphasize social planning.')
+
+    // Duplicate handle on create or update is rejected cleanly.
+    await expect(crew.create({ name: 'Outro', handle: 'comunista' })).rejects.toThrow('already used')
+    await expect(crew.updateProfile(capitalista.id, { handle: 'comunista' })).rejects.toThrow('already used')
+
+    // Auto-created bots without custom handles get distinct handles when display names collide.
+    const secondScout = await crew.start({ name: 'Scout', mission: 'Second scout', model: 'm', sessionId: 's2' })
+    expect(secondScout.bot.handle).toBe('scout-2')
+
+    // crewTool supports creating and updating bots too.
+    const ctx = { cwd: tmpdir(), signal: new AbortController().signal, crew }
+    const createdViaTool = JSON.parse((await crewTool.execute({
+      action: 'create',
+      name: 'Auditor',
+      handle: 'auditor',
+      instructions: 'Check edge cases.',
+    }, ctx)).content)
+    expect(createdViaTool).toMatchObject({ name: 'Auditor', handle: 'auditor', instructions: 'Check edge cases.' })
+
+    const updatedViaTool = JSON.parse((await crewTool.execute({
+      action: 'update',
+      id: createdViaTool.id,
+      instructions: 'Updated instructions.',
+    }, ctx)).content)
+    expect(updatedViaTool.instructions).toBe('Updated instructions.')
   })
 })

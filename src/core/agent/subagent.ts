@@ -10,9 +10,10 @@ import type { GoogleState } from '../google/state.js'
 import type { McpFacts } from '../mcp/servers.js'
 import { isPlanTool } from '../tools/permission.js'
 import { runAgent, type ToolPermission } from './loop.js'
-import { buildSystemPrompt, SUBAGENT_SYSTEM_PROMPT } from './system.js'
+import { buildSystemPrompt, SUBAGENT_SYSTEM_PROMPT, type SystemPromptBot } from './system.js'
 
 export interface SubagentRun {
+  bot?: SystemPromptBot
   provider: Provider
   model: string
   registry: ToolRegistry
@@ -122,6 +123,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     memories: [],
     plan: options.plan,
     sandbox: options.sandbox,
+    bot: options.bot,
   })
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: options.input.prompt }] },

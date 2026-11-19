@@ -1,4 +1,5 @@
 import type { FileChange } from '../change.js'
+import type { CrewAvatar } from '../crew-avatars.js'
 import type { RoutineDelivery } from '../outgoing.js'
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool'
@@ -117,6 +118,14 @@ export function isAttachmentPart(part: ContentPart): part is AttachmentPart {
   return part.type === 'document' || (part.type === 'image' && !part.derivedFromDocument)
 }
 
+/** Crew bot authorship carried on assistant messages across Sessions and surfaces. */
+export interface BotAuthor {
+  id: string
+  name: string
+  handle?: string
+  avatar?: CrewAvatar
+}
+
 export interface Message {
   role: Role
   content: ContentPart[]
@@ -155,6 +164,10 @@ export interface Message {
    * nobody appears to have asked for. Display state, like `at`, so the wires ignore it.
    */
   routine?: RoutineDelivery
+  /** Crew bot that authored this assistant response, when one did. */
+  bot?: BotAuthor
+  /** Error message when a Crew bot response failed before completing. */
+  error?: string
 }
 
 export interface ToolSpec {

@@ -127,8 +127,13 @@ export function sessionLabel(session: { title?: string; preview?: string }): str
  * names. The listing keeps `sessionLabel` — it draws the recap as the body below and would
  * otherwise say the same thing twice.
  */
-export function sessionRowLabel(session: { title?: string; preview?: string; recap?: string }): string {
-  return sessionLabel(session) || session.recap || 'New session'
+export function sessionRowLabel(session: {
+  title?: string
+  preview?: string
+  recap?: string
+  botName?: string
+}): string {
+  return sessionLabel(session) || session.recap || (session.botName ? `Chat with ${session.botName}` : 'New session')
 }
 
 export function formatSessionList(
@@ -162,8 +167,9 @@ export function formatSessionList(
     // A session working in a project says which one, before the size and the
     // time: it is the context the other two are read in, and the same list is
     // drawn by every surface.
+    const bot = session.bot ? (markdown ? `🤖 ${session.bot.name}` : `bot:${session.bot.name}`) : undefined
     const project = session.project ? style.projectName?.(session.project) : undefined
-    const meta = [project, `${session.messageCount} msgs`, formatWhen(session.updatedAt)]
+    const meta = [bot, project, `${session.messageCount} msgs`, formatWhen(session.updatedAt)]
       .filter(Boolean)
       .join(' · ')
     const detail = markdown ? meta : `  ${meta}`

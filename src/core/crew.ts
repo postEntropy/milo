@@ -20,6 +20,7 @@ import {
   type CrewAvatarShape,
 } from './crew-avatars.js'
 import { crewFile } from './config/paths.js'
+import type { BotAuthor } from './providers/types.js'
 
 export {
   CREW_AVATAR_ACCESSORIES,
@@ -31,6 +32,7 @@ export {
   type CrewAvatarAccessory,
   type CrewAvatarEyes,
   type CrewAvatarShape,
+  type BotAuthor,
 }
 
 export const crewAvatarSchema = z.object({
@@ -51,12 +53,103 @@ const PROCESS_INSTANCE_ID = randomUUID()
 const PROCESS_IDENTITY = processIdentity(process.pid)
 const MAX_BOT_ASSIGNMENTS = 50
 const MAX_BOT_NAME_LENGTH = 120
+export const MAX_BOT_HANDLE_LENGTH = 40
+export const MAX_BOT_INSTRUCTIONS_LENGTH = 8_000
+export const BOT_HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
 const MAX_GUIDANCE_LENGTH = 4_000
 const MAX_PRIOR_REPORTS = 5
 const MAX_PRIOR_CHARS = 8_000
 
 function cleanBotName(name: string): string {
   return name.replace(/[\r\n]+/g, ' ').replace(/\)/g, ' ').trim()
+}
+
+/** Normalizes an explicit mention handle (stripping leading `@` and lowercasing). */
+export function normalizeBotHandle(raw: string): string {
+  return raw.trim().replace(/^@+/, '').toLowerCase()
+}
+
+/** Derives a clean ASCII slug from a display name when no explicit handle was given. */
+export function slugifyBotHandle(name: string): string {
+  const ascii = name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 36)
+  return ascii && /^[a-z0-9]/.test(ascii) ? ascii : 'bot'
+}
+
+function nextUniqueHandle(seed: string, taken: Set<string>): string {
+  const base = slugifyBotHandle(seed)
+  if (!taken.has(base)) {
+    taken.add(base)
+    return base
+  }
+  for (let suffix = 2; ; suffix += 1) {
+    const tag = `-${suffix}`
+    const candidate = `${base.slice(0, MAX_BOT_HANDLE_LENGTH - tag.length)}${tag}`
+    if (!taken.has(candidate)) {
+      taken.add(candidate)
+      return candidate
+    }
+  }
+}
+
+function validateExplicitHandle(raw: string, taken: Set<string>): string {
+  const normalized = normalizeBotHandle(raw)
+  if (!BOT_HANDLE_PATTERN.test(normalized)) {
+    throw new Error(
+      `A mention name must be 1–${MAX_BOT_HANDLE_LENGTH} lowercase letters, numbers, hyphens, or underscores, starting with a letter or number.`,
+    )
+  }
+  if (taken.has(normalized)) {
+    throw new Error(`Mention name "@${normalized}" is already used by another bot.`)
+  }
+  return normalized
+}
+
+function cleanBotInstructions(raw: string | null | undefined): string | undefined {
+  if (raw === null || raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  if (trimmed.length > MAX_BOT_INSTRUCTIONS_LENGTH) {
+    throw new Error(`Instructions must be at most ${MAX_BOT_INSTRUCTIONS_LENGTH} characters.`)
+  }
+  return trimmed
+}
+
+/** Deterministic handle resolution for legacy bots that predate persisted handles. */
+function resolveBotHandles(bots: CrewBot[]): void {
+  const taken = new Set<string>()
+  for (const bot of bots) {
+    const stored = bot.handle ? normalizeBotHandle(bot.handle) : ''
+    if (stored && BOT_HANDLE_PATTERN.test(stored) && !taken.has(stored)) {
+      bot.handle = stored
+      taken.add(stored)
+    } else {
+      bot.handle = undefined
+    }
+  }
+  // Assign missing handles deterministically by creation order so adding a new bot
+  // never shifts an older bot's derived handle.
+  const missing = bots
+    .filter((bot) => !bot.handle)
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  for (const bot of missing) {
+    bot.handle = nextUniqueHandle(bot.name, taken)
+  }
+}
+
+/** Builds a portable authorship snapshot for transcripts and live events. */
+export function toBotAuthor(bot: Pick<CrewBot, 'id' | 'name' | 'handle' | 'avatar'>): BotAuthor {
+  return {
+    id: bot.id,
+    name: bot.name,
+    ...(bot.handle ? { handle: bot.handle } : {}),
+    avatar: resolveBotAvatar(bot),
+  }
 }
 
 /** Bounds prior assignment/work reports before injecting them into a prompt. */
@@ -104,7 +197,11 @@ const assignmentSchema = z.object({
   guidance: z.array(z.object({ id: z.string(), text: z.string(), at: z.number(), appliedAt: z.number().optional() })).optional(),
 })
 const botSchema = z.object({
-  id: z.string(), name: z.string(), createdAt: z.number(),
+  id: z.string(),
+  name: z.string(),
+  handle: z.string().optional(),
+  instructions: z.string().optional(),
+  createdAt: z.number(),
   avatar: crewAvatarSchema.optional(),
   assignments: z.array(assignmentSchema),
 })
@@ -174,12 +271,29 @@ export class CrewStore {
     const bots = this.readRaw()
     if (!bots) return []
     markDeadProcesses(bots)
+    resolveBotHandles(bots)
     for (const bot of bots) bot.avatar = resolveBotAvatar(bot)
     return bots.sort((a, b) => {
       const left = a.assignments.at(-1)
       const right = b.assignments.at(-1)
-      return Number(right?.state === 'running') - Number(left?.state === 'running') || (right?.startedAt ?? 0) - (left?.startedAt ?? 0)
+      return (
+        Number(right?.state === 'running') - Number(left?.state === 'running') ||
+        (right?.startedAt ?? 0) - (left?.startedAt ?? 0) ||
+        b.createdAt - a.createdAt
+      )
     })
+  }
+
+  get(id: string): CrewBot | undefined {
+    const trimmed = id.trim()
+    if (!trimmed) return undefined
+    return this.list().find((bot) => bot.id === trimmed)
+  }
+
+  findByHandle(rawHandle: string): CrewBot | undefined {
+    const normalized = normalizeBotHandle(rawHandle)
+    if (!normalized) return undefined
+    return this.list().find((bot) => bot.handle?.toLowerCase() === normalized)
   }
 
   /** Persist dead-process recovery so an OS PID reuse cannot resurrect an abandoned run. */
@@ -206,6 +320,7 @@ export class CrewStore {
       })
       const raw = this.readRaw(true) ?? []
       markDeadProcesses(raw)
+      resolveBotHandles(raw)
       for (const bot of raw) bot.avatar = resolveBotAvatar(bot)
       const result = fn(raw)
       this.cached = null
@@ -228,7 +343,9 @@ export class CrewStore {
       if (bot?.assignments.some((entry) => entry.state === 'running')) throw new Error('This bot is already working.')
       if (!bot) {
         const id = randomUUID()
-        bot = { id, name, createdAt: Date.now(), avatar: defaultBotAvatar(id, name), assignments: [] }
+        const taken = new Set(bots.map((entry) => entry.handle).filter((h): h is string => Boolean(h)))
+        const handle = nextUniqueHandle(name, taken)
+        bot = { id, name, handle, createdAt: Date.now(), avatar: defaultBotAvatar(id, name), assignments: [] }
         bots.push(bot)
       }
       const assignment: CrewAssignment = {
@@ -282,14 +399,91 @@ export class CrewStore {
     })
   }
 
-  async rename(id: string, name: string): Promise<CrewBot> {
+  async create(input: {
+    name: string
+    handle?: string
+    instructions?: string
+    avatar?: Partial<CrewAvatar>
+  }): Promise<CrewBot> {
+    return this.change((bots) => {
+      const name = cleanBotName(input.name)
+      if (!name) throw new Error('A bot needs a name.')
+      if (name.length > MAX_BOT_NAME_LENGTH) throw new Error(`A bot name must be at most ${MAX_BOT_NAME_LENGTH} characters.`)
+      const taken = new Set(bots.map((entry) => entry.handle).filter((h): h is string => Boolean(h)))
+      const handle = input.handle !== undefined
+        ? validateExplicitHandle(input.handle, taken)
+        : nextUniqueHandle(name, taken)
+      const instructions = cleanBotInstructions(input.instructions)
+      const id = randomUUID()
+      const baseAvatar = defaultBotAvatar(id, name)
+      let avatar = baseAvatar
+      if (input.avatar) {
+        const parsed = crewAvatarSchema.safeParse({ ...baseAvatar, ...input.avatar })
+        if (!parsed.success) {
+          throw new Error(
+            `Invalid avatar. Shapes: ${CREW_AVATAR_SHAPES.join(', ')}. Eyes: ${CREW_AVATAR_EYES.join(', ')}. Accessories: ${CREW_AVATAR_ACCESSORIES.join(', ')}. Palettes: ${COLOR_PALETTE_IDS.join(', ')}.`,
+          )
+        }
+        avatar = parsed.data
+      }
+      const bot: CrewBot = {
+        id,
+        name,
+        handle,
+        ...(instructions ? { instructions } : {}),
+        createdAt: Date.now(),
+        avatar,
+        assignments: [],
+      }
+      bots.push(bot)
+      return bot
+    })
+  }
+
+  async updateProfile(
+    id: string,
+    patch: { name?: string; handle?: string; instructions?: string | null },
+  ): Promise<CrewBot> {
     return this.change((bots) => {
       const bot = bots.find((entry) => entry.id === id)
       if (!bot) throw new Error('No bot has that id.')
-      const clean = cleanBotName(name)
-      if (!clean) throw new Error('A bot needs a name.')
-      if (clean.length > MAX_BOT_NAME_LENGTH) throw new Error(`A bot name must be at most ${MAX_BOT_NAME_LENGTH} characters.`)
-      bot.name = clean
+      if (patch.name !== undefined) {
+        const clean = cleanBotName(patch.name)
+        if (!clean) throw new Error('A bot needs a name.')
+        if (clean.length > MAX_BOT_NAME_LENGTH) throw new Error(`A bot name must be at most ${MAX_BOT_NAME_LENGTH} characters.`)
+        bot.name = clean
+      }
+      if (patch.handle !== undefined) {
+        const taken = new Set(
+          bots
+            .filter((entry) => entry.id !== id)
+            .map((entry) => entry.handle)
+            .filter((h): h is string => Boolean(h)),
+        )
+        bot.handle = validateExplicitHandle(patch.handle, taken)
+      }
+      if (patch.instructions !== undefined) {
+        const instructions = cleanBotInstructions(patch.instructions)
+        if (instructions) bot.instructions = instructions
+        else delete bot.instructions
+      }
+      return bot
+    })
+  }
+
+  async rename(id: string, name: string): Promise<CrewBot> {
+    return this.updateProfile(id, { name })
+  }
+
+  async remove(id: string): Promise<CrewBot> {
+    return this.change((bots) => {
+      const index = bots.findIndex((entry) => entry.id === id)
+      if (index === -1) throw new Error('No bot has that id.')
+      const bot = bots[index]!
+      if (bot.assignments.some((entry) => entry.state === 'running')) {
+        throw new Error('This bot is still working — stop it before removing.')
+      }
+      bots.splice(index, 1)
       return bot
     })
   }

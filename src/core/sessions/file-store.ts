@@ -134,7 +134,13 @@ export class FileSessionStore implements SessionStore {
    * has handed out and the ones already on disk, so a second process cannot take
    * a nickname this one is holding.
    */
-  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface, backend?: SessionBackend): Promise<SessionRecord> {
+  async create(
+    scope?: MemoryScope,
+    project?: string,
+    surface?: SessionSurface,
+    backend?: SessionBackend,
+    botId?: string,
+  ): Promise<SessionRecord> {
     return this.run(() => {
       const timestamp = this.now()
       const id = generateNickname(
@@ -151,6 +157,7 @@ export class FileSessionStore implements SessionStore {
         ...(scope ? { scope } : {}),
         ...(project ? { project } : {}),
         ...(backend ? { backend } : {}),
+        ...(botId ? { botId } : {}),
         ...(surface ? { surface } : {}),
       } satisfies SessionRecord
       this.pending.set(id, record)
@@ -442,6 +449,7 @@ export class FileSessionStore implements SessionStore {
         // A fork is the same work carried on in another session, so it stays in
         // the project its source was working in.
         ...(source.project ? { project: source.project } : {}),
+        ...(source.botId ? { botId: source.botId } : {}),
       }
       // Nothing to write yet, so it lives in memory like a minted session does.
       if (record.messages.length === 0) {
@@ -613,6 +621,7 @@ function parseRecord(value: unknown): SessionRecord | null {
     // still readable, just unattributable.
     scope: readScope(raw.scope),
     project: typeof raw.project === 'string' && raw.project.length > 0 ? raw.project : undefined,
+    ...(typeof raw.botId === 'string' && raw.botId.length > 0 ? { botId: raw.botId } : {}),
     ...(backend ? { backend } : {}),
     ...(typeof raw.surface === 'string' && SESSION_SURFACES.includes(raw.surface as SessionSurface)
       ? { surface: raw.surface as SessionSurface }

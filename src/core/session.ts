@@ -17,7 +17,7 @@ import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type Mem
 import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile, type RoutineDelivery } from './outgoing.js'
-import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
+import { type BotAuthor, DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { ModelProfile } from './providers/profile.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
@@ -28,10 +28,17 @@ import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { withTraceContext } from './trace-context.js'
 import { runSubagent } from './agent/subagent.js'
-import { formatPriorReports, type CrewStore } from './crew.js'
+import { formatPriorReports, toBotAuthor, type CrewBot, type CrewStore } from './crew.js'
+import {
+  type ExplicitMentionRef,
+  projectMessagesForModel,
+  resolveBotAuthor,
+  resolveMessageMentions,
+  unknownCrewBotsError,
+} from './crew-mentions.js'
 import type { DelegatedWorkStore } from './delegated-work.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
-import { extractProjectMentions, type Project, type ProjectPlacement } from './projects.js'
+import type { Project, ProjectPlacement } from './projects.js'
 import { verificationText, type VerificationResult } from './verification.js'
 import { readProjectInstructions, type ProjectInstructions } from './agent/instructions.js'
 import type { ClientKind } from './client.js'
@@ -343,6 +350,16 @@ export interface SendOptions {
    */
   aside?: string
   /**
+   * Handles (without leading `@`) that belong to the gateway itself rather than
+   * Crew bots — e.g. Telegram/Discord bot username or `@everyone` / `@here`.
+   */
+  ignoreMentions?: string[]
+  /**
+   * Disambiguated `@mention` picks made in an interactive composer autocomplete so
+   * colliding bot handles and folder names keep the exact target the user picked.
+   */
+  mentions?: readonly ExplicitMentionRef[]
+  /**
    * Whether the surface this turn is talking through draws a generated interface.
    * A client declares it when it connects — the web app does — and the hub hands it
    * here on every turn. Absent, or any surface but the web, draws nothing.
@@ -456,6 +473,7 @@ export class Session {
     targetModel: string,
     profile: ModelProfile | undefined,
     displayOnly: ReadonlySet<string> = new Set(),
+    currentBotId?: string,
   ): { provider: Provider; cannotSee: boolean } {
     const nativePdf = canSendNativePdf(chosenProvider, targetModel, profile)
     const cannotSee = profile?.vision === false || (profile?.vision === undefined && targetModel !== this.options.mediaModels?.vision)
@@ -464,7 +482,7 @@ export class Session {
       stream: (request) => chosenProvider.stream({
         ...request,
         nativePdf,
-        messages: request.messages.map((message) => ({
+        messages: projectMessagesForModel(request.messages, this.options.crew, currentBotId).map((message) => ({
           ...message,
           content: message.content.map((part) => {
             if (part.type === 'image' && (cannotSee || part.contextOmitted === true || (part.analysisOnly === true && profile?.vision !== true) || displayOnly.has(part.path))) {
@@ -628,6 +646,16 @@ export class Session {
 
   get title(): string | undefined {
     return this.record.title
+  }
+
+  get botId(): string | undefined {
+    return this.record.botId
+  }
+
+  get bot(): BotAuthor | undefined {
+    const id = this.record.botId
+    if (!id) return undefined
+    return resolveBotAuthor({ id, name: 'Removed bot' }, this.options.crew)
   }
 
   /**
@@ -912,7 +940,17 @@ export class Session {
       temperature,
       permissionPolicy,
     } = this.options
-    const mentionedFolders = !opts?.notice && input.includes('@') ? extractProjectMentions(input) : []
+    const crew = opts?.sessionsAllowed === false ? undefined : this.options.crew
+    const resolveBots = !this.record.botId && crew !== undefined && this.scope.gateway !== ROUTINE_GATEWAY
+    const resolvedMentions =
+      !opts?.notice && (input.includes('@') || Boolean(opts?.mentions?.length))
+        ? resolveMessageMentions(input, resolveBots ? crew : undefined, {
+            ignoreHandles: opts?.ignoreMentions,
+            explicitMentions: opts?.mentions,
+            resolveBots,
+          })
+        : undefined
+    const mentionedFolders = resolvedMentions?.folders ?? []
     const turnFolder = mentionedFolders[0]
     const cwd = turnFolder?.path ?? sessionCwd
     const turnProject: ProjectPlacement | undefined = turnFolder ? { ok: true, project: turnFolder } : this.options.project
@@ -987,9 +1025,28 @@ export class Session {
         : undefined
     // A shared chat or an unattended routine/delegated run must not expose bots
     // across sessions via the `crew` tool, while `task` still records to crew.
-    const crew = opts?.sessionsAllowed === false ? undefined : this.options.crew
     const crewToolAllowed = crew !== undefined && this.scope.gateway !== ROUTINE_GATEWAY
     const delegatedWork = opts?.sessionsAllowed === false || this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.delegatedWork
+
+    let targetBots: CrewBot[] = []
+    if (this.record.botId) {
+      const boundBot = crew?.get(this.record.botId)
+      if (!boundBot) {
+        yield {
+          type: 'error',
+          message: crew ? "This Session's Crew bot no longer exists." : 'Crew is not available in this session.',
+        }
+        return
+      }
+      targetBots = [boundBot]
+    } else if (resolvedMentions && crew && this.scope.gateway !== ROUTINE_GATEWAY) {
+      if (resolvedMentions.unknown.length > 0) {
+        yield { type: 'error', message: unknownCrewBotsError(resolvedMentions.unknown, crew) }
+        return
+      }
+      targetBots = resolvedMentions.bots
+    }
+
     const inProject = turnProject?.ok === true
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
@@ -1198,13 +1255,14 @@ export class Session {
       // having moved the session on — has to be reported, not thrown past the
       // caller's event loop.
       await this.persist()
-      const runAgentTurn = () => runAgent({
-        provider,
+      const baseMessages = targetBots.length > 0 ? [...this.messages] : undefined
+      const runAgentWith = (runProvider: Provider, runSystem: string, runMessages: Message[]) => runAgent({
+        provider: runProvider,
         model,
-        system: systemPrompt,
+        system: runSystem,
         tools,
         registry,
-        messages: this.messages,
+        messages: runMessages,
         context: {
           cwd,
           signal: abort,
@@ -1308,6 +1366,14 @@ export class Session {
               sandbox: this.options.sandbox,
               // The same project, so a delegated task carries the same code brief.
               project: turnProject,
+              bot: entry
+                ? {
+                    id: entry.bot.id,
+                    name: entry.bot.name,
+                    handle: entry.bot.handle,
+                    instructions: entry.bot.instructions,
+                  }
+                : undefined,
               // The same live state the parent's prompt carries, so a delegated
               // task can answer about the browser, the servers and Google too.
               browser: this.browserFacts(),
@@ -1389,104 +1455,229 @@ export class Session {
         genui: draws,
         trace: this.runTrace('chat', turnId),
       })
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        for await (const event of runAgentTurn()) {
-          // Measured once, on the turn's first output of any kind, so a session read
-          // back reports the same wait the surface that watched it drew.
-          if (
-            firstOutputMs === undefined &&
-            (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
-          ) {
-            firstOutputMs = Date.now() - startedAt
-          }
-          if (event.type === 'error') errored = true
-          else if (event.type === 'text-delta') answer += event.delta
-          else if (event.type === 'reasoning-delta') reasoning += event.delta
-          else if (event.type === 'tool-start') {
-            // The step that called a tool is finished being written. Without the
-            // break, the line before a tool call and the answer after it are one
-            // sentence in the log — and in an export, one paragraph.
-            answer = closeParagraph(answer)
-            running = { name: event.name, args: event.args }
-          }
-          else if (event.type === 'steer') {
-            note({ kind: 'user', text: event.text })
-            // For the same reason the opening message is written down before the
-            // answer comes: a crash mid-turn must not lose what the user said.
-            await this.persist()
-          } else if (event.type === 'tool-end') {
-            note({
-              kind: 'tool',
-              tool: {
-                name: event.name,
-                args: running?.args ?? {},
-                result: event.result,
-                isError: event.isError,
+      const runs: Array<CrewBot | undefined> = targetBots.length > 0 ? targetBots : [undefined]
+      let succeededBots = 0
+      let abortedTurn = false
+      for (const targetBot of runs) {
+        if (targetBot && abort.aborted) {
+          abortedTurn = true
+          break
+        }
+        const botAuthor = targetBot ? toBotAuthor(targetBot) : undefined
+        const runProvider = targetBot
+          ? this.wrapProviderForModel(chosenProvider, model, profile, displayOnly, targetBot.id).provider
+          : provider
+        const botSystemPrompt = targetBot
+          ? buildSystemPrompt({
+              ...prompt,
+              bot: {
+                id: targetBot.id,
+                name: targetBot.name,
+                handle: targetBot.handle,
+                instructions: targetBot.instructions,
               },
+              summary: this.summary,
+              browser: this.browserFacts(),
+              mcp: this.mcpFacts(),
+              google: this.options.google ?? null,
             })
-            running = null
+          : systemPrompt
+        const runSystem = instruction ? `${botSystemPrompt}\n\n${instruction}` : botSystemPrompt
+        const runMessages = targetBot ? [...baseMessages!] : this.messages
+        const runStartIndex = targetBot ? runMessages.length : firstNew
+        const runStartedAt = targetBot ? Date.now() : startedAt
+        let runAnswer = ''
+        let runReasoning = ''
+        let runFirstOutputMs: number | undefined
+        let runErrored = false
+        let runErrorText: string | undefined
+        let runAborted = false
+        this.wroteThisTurn = false
+        if (botAuthor) {
+          yield { type: 'bot-start', bot: botAuthor }
+        }
+        try {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            for await (const event of runAgentWith(runProvider, runSystem, runMessages)) {
+              // Measured once, on the turn's first output of any kind, so a session read
+              // back reports the same wait the surface that watched it drew.
+              if (
+                runFirstOutputMs === undefined &&
+                (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
+              ) {
+                runFirstOutputMs = Date.now() - runStartedAt
+              }
+              if (event.type === 'error') {
+                runErrored = true
+                runErrorText = event.message
+              } else if (event.type === 'text-delta') {
+                runAnswer += event.delta
+              } else if (event.type === 'reasoning-delta') {
+                runReasoning += event.delta
+              } else if (event.type === 'tool-start') {
+                // The step that called a tool is finished being written. Without the
+                // break, the line before a tool call and the answer after it are one
+                // sentence in the log — and in an export, one paragraph.
+                runAnswer = closeParagraph(runAnswer)
+                running = { name: event.name, args: event.args }
+              } else if (event.type === 'steer') {
+                note({ kind: 'user', text: event.text })
+                // For the same reason the opening message is written down before the
+                // answer comes: a crash mid-turn must not lose what the user said.
+                if (!targetBot) await this.persist()
+              } else if (event.type === 'tool-end') {
+                note({
+                  kind: 'tool',
+                  tool: {
+                    name: event.name,
+                    args: running?.args ?? {},
+                    result: event.result,
+                    isError: event.isError,
+                  },
+                })
+                running = null
+              }
+              yield event
+            }
+
+            // The gate: a turn that changed files ends with what the project's own
+            // checks answered. An actionable failure gets one bounded repair attempt.
+            if (
+              !runErrored &&
+              !abort.aborted &&
+              this.wroteThisTurn &&
+              turnProject?.ok &&
+              this.options.verify
+            ) {
+              const project = turnProject.project
+              const startedVerification = Date.now()
+              let result: VerificationResult
+              try {
+                result = await this.options.verify(project)
+              } catch (error) {
+                result = { kind: 'unreadable', error: errorMessage(error) }
+              }
+              this.options.traces?.record({
+                at: new Date().toISOString(),
+                startedAt: new Date(startedVerification).toISOString(),
+                event: 'verification',
+                turn: turnId,
+                ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
+                ms: Date.now() - startedVerification,
+                purpose: 'verification',
+                surface: this.scope.gateway,
+                session: this.id,
+                project: project.id,
+                ...(result.kind === 'checks'
+                  ? {
+                      checks: result.checks.length,
+                      failed: result.checks.filter((check) => !check.ok).map((check) => check.name),
+                    }
+                  : { checks: 0 }),
+              })
+              const text = verificationText(result)
+              const ok = result.kind === 'checks' ? result.ok : result.kind === 'none'
+              // Kept on the message the answer landed on — the last one this turn left — so a
+              // session read back draws the card the live turn drew. The event is not the only
+              // carrier: without this, reopening a conversation loses what the checks said.
+              const landed = runMessages.findLast((message, index) => index >= runStartIndex && message.role === 'assistant')
+              if (landed) landed.verification = { ok, text }
+              yield { type: 'verification', result, text, ok }
+              if (attempt === 0 && result.kind === 'checks' && !result.ok && !abort.aborted) {
+                runMessages.push({
+                  role: 'user',
+                  internal: 'verification',
+                  displayText: '',
+                  content: [{
+                    type: 'text',
+                    text: `Milo's automatic project checks failed after your changes. Diagnose and fix the failures below, then report what changed. Do not hide or revert unrelated user work. If a failure is unrelated or cannot be fixed safely, explain that.\n\n${text}`,
+                  }],
+                })
+                if (!targetBot) await this.persist()
+                continue
+              }
+            }
+            break
           }
-          yield event
+        } catch (error) {
+          if (isAbort(error, signal)) {
+            runAborted = true
+            runErrored = true
+            yield { type: 'aborted' }
+          } else {
+            runErrored = true
+            runErrorText = errorMessage(error)
+            logWarn(`turn failed on ${scopeKey(this.scope)}: ${runErrorText}`)
+            yield { type: 'error', message: runErrorText }
+          }
         }
 
-        // The gate: a turn that changed files ends with what the project's own
-        // checks answered. An actionable failure gets one bounded repair attempt.
-        if (
-          !errored &&
-          !abort.aborted &&
-          this.wroteThisTurn &&
-          turnProject?.ok &&
-          this.options.verify
-        ) {
-          const project = turnProject.project
-          const startedVerification = Date.now()
-          let result: VerificationResult
+        if (botAuthor) {
+          const produced = runMessages.slice(runStartIndex)
+          let firstAssistant: Message | undefined
+          let lastAssistant: Message | undefined
+          for (const message of produced) {
+            if (message.role !== 'assistant') continue
+            message.bot = botAuthor
+            if (!firstAssistant) firstAssistant = message
+            lastAssistant = message
+          }
+          if (
+            runFirstOutputMs !== undefined &&
+            runFirstOutputMs >= 1000 &&
+            firstAssistant &&
+            firstAssistant.thoughtMs === undefined
+          ) {
+            firstAssistant.thoughtMs = runFirstOutputMs
+          }
+          if (runErrored && runErrorText && !runAborted) {
+            if (lastAssistant) {
+              lastAssistant.error = runErrorText
+            } else {
+              produced.push({
+                role: 'assistant',
+                content: [],
+                bot: botAuthor,
+                error: runErrorText,
+                at: Date.now(),
+              })
+            }
+          }
+          this.messages.push(...produced)
+          if (runAnswer.trim()) {
+            answer = answer ? `${answer}\n\n${runAnswer}` : runAnswer
+          }
+          if (runAnswer || runReasoning) {
+            note({ kind: 'assistant', text: runAnswer, reasoning: runReasoning })
+          }
           try {
-            result = await this.options.verify(project)
-          } catch (error) {
-            result = { kind: 'unreadable', error: errorMessage(error) }
-          }
-          this.options.traces?.record({
-            at: new Date().toISOString(),
-            startedAt: new Date(startedVerification).toISOString(),
-            event: 'verification',
-            turn: turnId,
-            ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
-            ms: Date.now() - startedVerification,
-            purpose: 'verification',
-            surface: this.scope.gateway,
-            session: this.id,
-            project: project.id,
-            ...(result.kind === 'checks'
-              ? {
-                  checks: result.checks.length,
-                  failed: result.checks.filter((check) => !check.ok).map((check) => check.name),
-                }
-              : { checks: 0 }),
-          })
-          const text = verificationText(result)
-          const ok = result.kind === 'checks' ? result.ok : result.kind === 'none'
-          // Kept on the message the answer landed on — the last one this turn left — so a
-          // session read back draws the card the live turn drew. The event is not the only
-          // carrier: without this, reopening a conversation loses what the checks said.
-          const landed = this.messages.findLast((message, index) => index >= firstNew && message.role === 'assistant')
-          if (landed) landed.verification = { ok, text }
-          yield { type: 'verification', result, text, ok }
-          if (attempt === 0 && result.kind === 'checks' && !result.ok && !abort.aborted) {
-            this.messages.push({
-              role: 'user',
-              internal: 'verification',
-              displayText: '',
-              content: [{
-                type: 'text',
-                text: `Milo's automatic project checks failed after your changes. Diagnose and fix the failures below, then report what changed. Do not hide or revert unrelated user work. If a failure is unrelated or cannot be fixed safely, explain that.\n\n${text}`,
-              }],
-            })
             await this.persist()
-            continue
+          } catch (persistError) {
+            const persistMsg = errorMessage(persistError)
+            runErrored = true
+            runErrorText ??= persistMsg
+            yield { type: 'error', message: persistMsg }
           }
+          yield {
+            type: 'bot-end',
+            bot: botAuthor,
+            status: runAborted ? 'stopped' : runErrored ? 'error' : 'done',
+            ...(!runAborted && runErrorText ? { error: runErrorText } : {}),
+          }
+          if (runAborted) {
+            abortedTurn = true
+            break
+          }
+          if (!runErrored) succeededBots += 1
+        } else {
+          answer = runAnswer
+          reasoning = runReasoning
+          firstOutputMs = runFirstOutputMs
+          errored = runErrored
         }
-        break
+      }
+      if (targetBots.length > 0) {
+        errored = abortedTurn || succeededBots === 0
       }
     } catch (error) {
       // A stop is not a failure: reporting `AbortError` to the user turns their
@@ -1508,28 +1699,37 @@ export class Session {
       // below so a session read back carries the number the live turn drew. Only a wait
       // worth reporting is written — the same under-a-second rule the surfaces draw by —
       // so a reload says exactly what the live turn said and nothing more.
-      const first = this.messages[firstNew]
-      if (
-        firstOutputMs !== undefined &&
-        firstOutputMs >= 1000 &&
-        first?.role === 'assistant' &&
-        first.thoughtMs === undefined
-      ) {
-        first.thoughtMs = firstOutputMs
+      if (targetBots.length === 0) {
+        const first = this.messages[firstNew]
+        if (
+          firstOutputMs !== undefined &&
+          firstOutputMs >= 1000 &&
+          first?.role === 'assistant' &&
+          first.thoughtMs === undefined
+        ) {
+          first.thoughtMs = firstOutputMs
+        }
+        try {
+          // Runs even when the consumer aborts, so the partial turn is on disk.
+          await this.persist()
+        } catch (error) {
+          // Another process moved this session on and the transcript here cannot
+          // be written without erasing its turns. The turn ends saying so rather
+          // than being passed off as saved; an error already reported above is not
+          // repeated.
+          if (!errored) yield { type: 'error', message: errorMessage(error) }
+          errored = true
+        }
+        // A turn that was stopped still said something worth finding later.
+        if (answer || reasoning) note({ kind: 'assistant', text: answer, reasoning })
+      } else {
+        try {
+          await this.persist()
+        } catch (error) {
+          if (!errored) yield { type: 'error', message: errorMessage(error) }
+          errored = true
+        }
       }
-      try {
-        // Runs even when the consumer aborts, so the partial turn is on disk.
-        await this.persist()
-      } catch (error) {
-        // Another process moved this session on and the transcript here cannot
-        // be written without erasing its turns. The turn ends saying so rather
-        // than being passed off as saved; an error already reported above is not
-        // repeated.
-        if (!errored) yield { type: 'error', message: errorMessage(error) }
-        errored = true
-      }
-      // A turn that was stopped still said something worth finding later.
-      if (answer || reasoning) note({ kind: 'assistant', text: answer, reasoning })
       this.options.history?.append(entries)
       this.options.traces?.record({
         at: new Date().toISOString(),

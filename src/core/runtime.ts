@@ -14,7 +14,7 @@ import type { ModelProfile } from './providers/profile.js'
 import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
-import type { CrewStore } from './crew.js'
+import { type CrewStore, toBotAuthor } from './crew.js'
 import type { DelegatedWorkStore } from './delegated-work.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { addProject, placeProject, withProjectPlacement as lockProjectPlacement, type Project, type ProjectLookup, type ProjectPlacement } from './projects.js'
@@ -193,6 +193,8 @@ export interface NewSessionOptions {
   confirmed?: boolean
   /** Stable per-creation scope key used to reconcile a repeated external-session request. */
   creationKey?: string
+  /** Crew bot id to bind to a direct bot conversation Session. */
+  botId?: string
 }
 
 /**
@@ -251,6 +253,14 @@ export class AgentRuntime {
     title?: string,
     options?: NewSessionOptions,
   ): Promise<Session> {
+    if (options?.botId) {
+      if (options.backend === 'command-code') {
+        throw new Error('Direct Crew bot Sessions are not supported with the Command Code backend.')
+      }
+      if (!this.options.crew?.get(options.botId)) {
+        throw new Error(`No Crew bot has the id "${options.botId}".`)
+      }
+    }
     if (options?.backend === 'command-code') {
       if (!options.project) throw new Error('Command Code Sessions must be started in a Work project.')
       if (options.confirmed !== true) throw new Error('Confirm the Command Code backend before creating this Session.')
@@ -417,11 +427,17 @@ export class AgentRuntime {
       const lookedAt = looked.get(session.id)
       const unread = lookedAt !== undefined && session.updatedAt > lookedAt
       const running = await this.store.busy(session.id)
+      const botRecord = session.botId ? this.options.crew?.get(session.botId) : undefined
+      const bot = botRecord ? toBotAuthor(botRecord) : undefined
       return {
         ...session,
+        ...(bot ? { bot } : {}),
         // The name a row shows, said again now the recap is here: the store's own summary
         // had none to fall back on. One rule, composed where its inputs are.
-        label: sessionRowLabel(session),
+        label: sessionRowLabel({
+          ...session,
+          botName: bot?.name ?? (session.botId ? 'Removed bot' : undefined),
+        }),
         ...(running ? { running: true } : {}),
         ...(unread ? { unread: true } : {}),
       }
@@ -786,7 +802,7 @@ export class AgentRuntime {
       throw new Error(placement && !placement.ok ? placement.error : `No project with the id ${options.project}.`)
     }
     await this.detach(scope)
-    const record = await this.store.create(scope, options?.project, options?.surface)
+    const record = await this.store.create(scope, options?.project, options?.surface, undefined, options?.botId)
     if (title?.trim()) record.title = title.trim()
     if (options?.backend === 'command-code') {
       record.backend = {

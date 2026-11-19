@@ -284,7 +284,16 @@ export interface SystemPromptInput {
   plan?: boolean
   /** How the shell is contained, when the config asked for `bwrap`. */
   sandbox?: 'off' | 'workspace'
+  /** Crew bot profile speaking on this turn, if any. */
+  bot?: SystemPromptBot
   now?: Date
+}
+
+export interface SystemPromptBot {
+  id: string
+  name: string
+  handle?: string
+  instructions?: string
 }
 
 /** One tab of a surface's panel, as the prompt describes it. */
@@ -595,6 +604,22 @@ function setupSection(input: SystemPromptInput): string {
   ].join('\n')
 }
 
+function botSection(bot: SystemPromptBot): string {
+  const identity = bot.handle ? `${bot.name} (@${bot.handle})` : bot.name
+  const lines = [
+    '## Crew bot profile',
+    `- You are speaking as Crew bot **${identity}** (id: \`${bot.id}\`).`,
+    `- Answer directly as ${bot.name}. Do not speak for other bots or simulate their replies.`,
+    '- In shared Sessions, prior responses from Crew bots may be labeled with `[Crew bot Name (@handle)]` for context; write your response directly without repeating that prefix.',
+    '- Profile instructions define your role, perspective, and style. Folder rules, Session permissions, and tool limits still take precedence and remain enforced.',
+  ]
+  const trimmed = bot.instructions?.trim()
+  if (trimmed) {
+    lines.push('<bot_instructions>', trimmed, '</bot_instructions>')
+  }
+  return lines.join('\n')
+}
+
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const sections: string[] = [input.base.trim()]
 
@@ -656,6 +681,9 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   }
   if (input.instructions && input.instructions.kind !== 'absent') {
     sections.push(projectInstructionsSection(input.instructions))
+  }
+  if (input.bot) {
+    sections.push(botSection(input.bot))
   }
 
   sections.push(setupSection(input))

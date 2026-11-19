@@ -1,5 +1,5 @@
 import type { MemoryScope } from '../memory/types.js'
-import type { AttachmentPart, Message } from '../providers/types.js'
+import type { AttachmentPart, BotAuthor, Message } from '../providers/types.js'
 import { sessionRowLabel } from './format.js'
 
 /**
@@ -91,6 +91,8 @@ export interface SessionRecord {
    */
   project?: string
   backend?: SessionBackend
+  /** Crew bot bound to a direct conversation Session, by stable bot id. */
+  botId?: string
   /** The surface that asked for this session; see `SessionSurface`. */
   surface?: SessionSurface
   /**
@@ -125,6 +127,10 @@ export interface SessionSummary {
   project?: string
   /** The surface that asked for it; see `SessionSurface`. */
   surface?: SessionSurface
+  /** Crew bot id if this is a direct bot conversation. */
+  botId?: string
+  /** Current Crew bot identity resolved from `botId` when available. */
+  bot?: BotAuthor
   backend?: SessionBackendSummary
   /**
    * Whether a turn holds this session right now — read off the lease, so it is
@@ -198,7 +204,13 @@ export interface SessionStore {
    * than by whoever saves first: a session that has not been spoken in yet is in no
    * file, so what the store mints is the only place they can live.
    */
-  create(scope?: MemoryScope, project?: string, surface?: SessionSurface, backend?: SessionBackend): Promise<SessionRecord>
+  create(
+    scope?: MemoryScope,
+    project?: string,
+    surface?: SessionSurface,
+    backend?: SessionBackend,
+    botId?: string,
+  ): Promise<SessionRecord>
   load(id: string): Promise<SessionRecord | null>
   /**
    * Writes the record only if the stored one is still at `expectedVersion`,
@@ -359,6 +371,7 @@ export function toSummary(record: SessionRecord): SessionSummary {
     scope: record.scope,
     project: record.project,
     ...(record.surface ? { surface: record.surface } : {}),
+    ...(record.botId ? { botId: record.botId } : {}),
     ...(commandCode
       ? {
           backend: {

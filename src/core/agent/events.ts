@@ -1,6 +1,7 @@
 import type { FileChange } from '../change.js'
 import type { GenUiRender } from '../genui.js'
 import type { PanelRequest } from '../panel.js'
+import type { BotAuthor } from '../providers/types.js'
 import type { TodoItem } from '../todos.js'
 import type { VerificationResult } from '../verification.js'
 
@@ -94,6 +95,10 @@ export type AgentEvent =
    * transcript sent back on the next request.
    */
   | { type: 'verification'; result: VerificationResult; text: string; ok: boolean }
+  /** A Crew bot began answering inside this turn. */
+  | { type: 'bot-start'; bot: BotAuthor }
+  /** That Crew bot finished, failed, or was stopped. */
+  | { type: 'bot-end'; bot: BotAuthor; status: 'done' | 'error' | 'stopped'; error?: string }
   | { type: 'done'; finishReason: string }
   /** The turn was stopped (Ctrl+C, shutdown) — not a failure. */
   | { type: 'aborted' }
