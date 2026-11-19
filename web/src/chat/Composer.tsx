@@ -4,6 +4,7 @@ import { isPhone, usePhone } from '../lib/phone.js'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
+import { shortModel } from '../../../src/gateways/model-label.ts'
 import type { CrewBot } from '../../../src/core/crew.js'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
 import type { JobView, MessageMentionRef } from '@protocol'
@@ -12,6 +13,7 @@ import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
+import { ProviderMark } from '../ui/ProviderMark.js'
 import { ReasoningSlider } from '../ui/ReasoningSlider.js'
 
 interface Props {
@@ -635,9 +637,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>}
           <div className="composer-model-wrap">
             <Select
-              className={`composer-pill${folded ? ' icon-only' : ''}`}
+              className={`composer-pill composer-model-pill${folded ? ' icon-only' : ''}${model ? '' : ' is-empty'}`}
               label="Model and reasoning effort"
-              icon="spark"
+              leading={provider && provider !== 'milo' ? <ProviderMark id={provider} size={14} /> : <Icon name="spark" size={14} />}
               body={wide ? (close) => <ModelPicker
                 className="composer-model-panes"
                 presets={providers ?? []}
@@ -646,6 +648,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 browsing={browsing}
                 catalog={catalog}
                 note={error || 'This provider reports no models.'}
+                compact
                 onBrowse={browse}
                 onPick={(id) => { chooseModel(id); close() }}
               /> : undefined}
@@ -665,7 +668,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 <ReasoningSlider value={effort} onChange={onEffortChange} />
               </div>}
               value={model}
-              triggerLabel={folded ? '' : model}
+              triggerLabel={folded ? '' : (model ? shortModel(model) : 'Model')}
               choices={(catalog ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}

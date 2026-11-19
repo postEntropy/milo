@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Icon } from './Icons.js'
 import { ModelDetails } from './ModelDetails.js'
@@ -16,7 +16,7 @@ type Preset = { id: string; name: string }
  * The settings screen and the composer's model pill both draw it. The caller
  * names the container, so the same panes are a section there and a menu here.
  */
-export function ModelPicker({ presets, provider, model, browsing, catalog, onBrowse, onPick, className = 'model-picker', note }: {
+export function ModelPicker({ presets, provider, model, browsing, catalog, onBrowse, onPick, className = 'model-picker', note, compact = false }: {
   presets: Preset[]
   /** What is set, marked whether or not it is the one being shown. */
   provider: string
@@ -31,14 +31,20 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
   className?: string
   /** Why the list is empty, where the caller knows: the composer says what failed. */
   note?: ReactNode
+  /** Compact popover treatment (composer): drop section headings and focus the filter. */
+  compact?: boolean
 }) {
   const [filter, setFilter] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (compact) searchRef.current?.focus()
+  }, [compact])
   const query = filter.trim().toLowerCase()
   const shown = (catalog ?? []).filter((item) => `${item.id} ${item.name ?? ''}`.toLowerCase().includes(query))
 
   return <div className={className}>
     <div className="model-picker-pane">
-      <h3>Providers</h3>
+      {!compact && <h3>Providers</h3>}
       <div className="model-picker-list">
         {presets.length === 0 ? <p className="model-picker-note">No provider with a key is configured yet. Add one in Settings.</p>
           : presets.map((preset) => <button
@@ -48,17 +54,17 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
           aria-current={preset.id === provider ? 'true' : undefined}
           onClick={() => onBrowse(preset.id)}
         >
-          <ProviderMark id={preset.id} size={16} />
+          <ProviderMark id={preset.id} size={15} />
           <span className="model-picker-name">{preset.name}</span>
           {preset.id === provider && <Icon name="check" size={14} />}
         </button>)}
       </div>
     </div>
     <div className="model-picker-pane">
-      <h3>Models</h3>
+      {!compact && <h3>Models</h3>}
       <label className="model-picker-search">
         <Icon name="search" size={14} />
-        <input aria-label="Filter models" placeholder="Filter models" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        <input ref={searchRef} aria-label="Filter models" placeholder="Search models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
         {filter && <button type="button" className="icon-button" aria-label="Clear filter" onClick={() => setFilter('')}>
           <Icon name="x" size={14} />
         </button>}

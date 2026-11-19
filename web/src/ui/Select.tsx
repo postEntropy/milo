@@ -27,6 +27,7 @@ export function Select({
   searchFrom = 8,
   note,
   icon,
+  leading,
   caret = true,
   triggerLabel,
   filterExtra,
@@ -50,6 +51,8 @@ export function Select({
   note?: ReactNode
   /** A mark to lead the trigger with, where the trigger is a pill. */
   icon?: Parameters<typeof Icon>[0]['name']
+  /** Custom leading node (such as a provider mark) in place of a static icon. */
+  leading?: ReactNode
   /** A caret says a control opens something; only where there is no room for it. */
   caret?: boolean
   /** What the trigger reads, when the chosen row's own label is not it. */
@@ -174,7 +177,7 @@ export function Select({
         }
       }}
     >
-      {icon && <Icon name={icon} size={15} />}
+      {leading ?? (icon && <Icon name={icon} size={15} />)}
       <span className="select-value">{triggerLabel ?? current?.label ?? value}</span>
       {current?.meta}
       {caret && <Icon className="select-caret" name="chevron" size={15} />}

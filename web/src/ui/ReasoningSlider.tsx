@@ -39,7 +39,7 @@ export function ReasoningSlider({ id, value, onChange }: {
       className="reasoning-slider-dot"
       data-on={index <= at ? 'true' : undefined}
       data-current={index === at ? 'true' : undefined}
-      style={{ left: `calc(15px + (100% - 30px) * ${index / (EFFORT_LEVELS.length - 1)})` }}
+      style={{ left: `calc(var(--slider-thumb, 30px) / 2 + (100% - var(--slider-thumb, 30px)) * ${index / (EFFORT_LEVELS.length - 1)})` }}
     />)}
     </div>
     <div className="reasoning-slider-stops" aria-hidden="true">
