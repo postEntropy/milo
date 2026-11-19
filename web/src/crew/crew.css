@@ -88,6 +88,14 @@
 .crew-history { margin-bottom: var(--space-3); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); }
 .crew-history p { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-2) 0 0; }
 .crew-guidance-pill { font-size: var(--text-xs); color: var(--fg-2); background: var(--surface-warm); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); }
+.crew-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.crew-profile-card { display: flex; flex-direction: column; gap: var(--space-4); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-6) var(--space-7); margin-bottom: var(--space-5); }
+.crew-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); }
+.crew-profile-card textarea { min-height: 96px; resize: vertical; }
+.crew-profile-card .field input, .crew-profile-card .field textarea { background: var(--bg); }
+.crew-profile-card .field input:focus, .crew-profile-card .field textarea:focus { background: var(--bg); }
+.crew-handle { font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
+.crew-instructions-preview { margin: 0; font-size: var(--text-xs); color: var(--fg-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 @media (max-width: 900px) {
   .crew-page .settings-inner { padding-top: calc(var(--phone-top) + var(--control-md) + var(--space-6)); }
@@ -95,5 +103,5 @@
 
 @media (max-width: 620px) {
   .crew-bot-hero { flex-wrap: wrap; }
-  .crew-hero-actions { flex-direction: row; width: 100%; justify-content: flex-start; }
+  .crew-hero-actions { flex-direction: row; flex-wrap: wrap; width: 100%; justify-content: flex-start; }
 }

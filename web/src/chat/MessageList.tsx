@@ -20,7 +20,7 @@ import { toolIconName } from '../ui/tool-icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { extractToolBot } from '../../../src/core/crew-avatars.js'
-import { BotAvatar } from '../crew/BotAvatar.js'
+import { BotAvatar, botAvatarOf } from '../crew/BotAvatar.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 import type { ChatMessage } from './message.js'
 
@@ -528,9 +528,17 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
       })
     )}
     {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
+    {message.error && <div className="message-bot-error" role="alert">{message.error}</div>}
   </>
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}${running && message.waitingSince === undefined ? ' is-streaming' : ''}`}>
     <div className="message-content">
+      {message.bot && !message.routine && (
+        <div className="message-bot-head">
+          <BotAvatar avatar={botAvatarOf(message.bot)} state={running ? 'running' : undefined} size={24} />
+          <span className="message-bot-name">{message.bot.name}</span>
+          {message.bot.handle && <span className="message-bot-handle">@{message.bot.handle}</span>}
+        </div>
+      )}
       {message.routine ? <RoutineCard routine={message.routine}>{body}</RoutineCard> : body}
       {message.actions && message.actions.length > 0 && (
         <div className="message-actions">
@@ -592,7 +600,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
         </div>
       )}
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
-      {message.status && <div className="message-status">{message.status}</div>}
+      {!message.error && message.status && <div className="message-status">{message.status}</div>}
     </div>
     {message.delivery && <div className="message-delivery" role="status">
       <span>{message.delivery.state === 'sending' ? 'Sending…' : message.delivery.state === 'queued' ? 'Queued' : message.delivery.detail ?? 'Could not send.'}</span>

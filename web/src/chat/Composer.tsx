@@ -4,8 +4,10 @@ import { isPhone, usePhone } from '../lib/phone.js'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
+import type { CrewBot } from '../../../src/core/crew.js'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
-import type { JobView } from '@protocol'
+import type { JobView, MessageMentionRef } from '@protocol'
+import { BotAvatar, botAvatarOf } from '../crew/BotAvatar.js'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
@@ -21,6 +23,8 @@ interface Props {
   onKillJob?: (id: string) => void
   /** Remembered host folders available to mention with `@`. */
   folders?: { id: string; name: string; path: string }[]
+  /** Configured Crew bots available to mention with `@`. */
+  bots?: CrewBot[]
   provider: string
   /** What the provider is called on screen, so its models can be lead with it. */
   providerName: string
@@ -45,7 +49,7 @@ interface Props {
   onApprovePlan(): void
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
-  onSend(text: string, intent: 'steer' | 'queue', files?: File[]): Promise<boolean>
+  onSend(text: string, intent: 'steer' | 'queue', files?: File[], mentions?: MessageMentionRef[]): Promise<boolean>
   onStop(): void
   /** Sets the pair: the model, and the provider it answers through. */
   onModelChange(model: string, provider: string): Promise<void>
@@ -97,6 +101,32 @@ function oneLine(text: string): string {
   return flat.length > 80 ? `${flat.slice(0, 77)}…` : flat
 }
 
+interface PickedMention extends MessageMentionRef {
+  token: string
+}
+
+function adjustPickedMentions(
+  previous: string,
+  next: string,
+  current: readonly PickedMention[],
+): PickedMention[] {
+  if (current.length === 0) return []
+  const delta = next.length - previous.length
+  const kept: PickedMention[] = []
+  for (const item of current) {
+    if (next.slice(item.start, item.end) === item.token) {
+      kept.push(item)
+      continue
+    }
+    const shiftedStart = item.start + delta
+    const shiftedEnd = item.end + delta
+    if (shiftedStart >= 0 && shiftedEnd <= next.length && next.slice(shiftedStart, shiftedEnd) === item.token) {
+      kept.push({ ...item, start: shiftedStart, end: shiftedEnd })
+    }
+  }
+  return kept
+}
+
 const MAX_FILE_DRAFTS = 8
 
 function setBoundedFileDraft(map: Map<string, File[]>, key: string, files: File[]): void {
@@ -110,7 +140,7 @@ function setBoundedFileDraft(map: Map<string, File[]>, key: string, files: File[
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, folders = [], provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange },
+  { busy, queued, jobs, onKillJob, folders = [], bots = [], provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -135,6 +165,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   /** What was typed in each conversation, kept under the one it was typed in. */
   const drafts = useRef(new Map<string, string>([[draftKey, initialDraft.current.text]]))
   const fileDrafts = useRef(new Map<string, File[]>())
+  const mentionDrafts = useRef(new Map<string, PickedMention[]>())
+  const [pickedMentions, setPickedMentions] = useState<PickedMention[]>([])
   const sending = useRef(false)
   const shownKey = useRef(draftKey)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
@@ -173,21 +205,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [draft, dismissed])
 
   const mention = useMemo(() => {
-    if (dismissed === draft || folders.length === 0) return null
+    if (dismissed === draft || (folders.length === 0 && bots.length === 0)) return null
     const before = draft.slice(0, caret)
     const match = /(?:^|\s)@([^\s]*)$/.exec(before)
     if (!match) return null
     const query = match[1]!.toLowerCase()
-    const options = folders
+    const matchedBots = bots
+      .filter((bot) => {
+        const handle = bot.handle?.toLowerCase() ?? ''
+        if (!handle) return false
+        return !query || handle.includes(query) || bot.name.toLowerCase().includes(query)
+      })
+      .slice(0, 6)
+      .map((bot) => ({ kind: 'bot' as const, key: `bot:${bot.id}`, insert: bot.handle!, bot }))
+    const matchedFolders = folders
       .filter((folder) => !query || folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query))
-      .slice(0, 8)
+      .slice(0, Math.max(0, 8 - matchedBots.length))
+      .map((folder) => ({ kind: 'folder' as const, key: `folder:${folder.id}`, insert: folder.name, folder }))
+    const options = [...matchedBots, ...matchedFolders]
     if (options.length === 0) return null
     return {
       start: before.length - match[1]!.length - 1,
       end: caret,
       options,
     }
-  }, [draft, caret, dismissed, folders])
+  }, [draft, caret, dismissed, folders, bots])
 
   const menuCount = palette.length > 0 ? palette.length : (mention?.options.length ?? 0)
 
@@ -207,6 +249,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const load = useCallback((text: string): void => {
     setDraft(text)
     drafts.current.set(draftKey, text)
+    setPickedMentions([])
+    mentionDrafts.current.delete(draftKey)
     try { localStorage.setItem(`milo-draft:${draftKey}`, text); setDraftStorageError(false) }
     catch { setDraftStorageError(true) }
     requestAnimationFrame(() => {
@@ -258,7 +302,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [draft])
 
   /** Writes the draft and remembers it, so leaving the conversation keeps it. */
-  function editDraft(next: string): void {
+  function editDraft(next: string, nextPicked?: PickedMention[]): void {
+    const adjusted = nextPicked ?? adjustPickedMentions(draft, next, pickedMentions)
+    setPickedMentions(adjusted)
+    if (adjusted.length > 0) mentionDrafts.current.set(draftKey, adjusted)
+    else mentionDrafts.current.delete(draftKey)
     setDraft(next)
     drafts.current.set(draftKey, next)
     try {
@@ -300,14 +348,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       setBoundedFileDraft(fileDrafts.current, draftKey, earlyFiles)
       fileDrafts.current.delete(previous)
     }
+    const earlyMentions = previous === pendingDraftKey ? mentionDrafts.current.get(previous) : undefined
+    if (earlyMentions?.length && !mentionDrafts.current.has(draftKey)) {
+      mentionDrafts.current.set(draftKey, earlyMentions)
+      mentionDrafts.current.delete(previous)
+    }
     setDraft(restored)
     setFiles(fileDrafts.current.get(draftKey) ?? [])
+    setPickedMentions(mentionDrafts.current.get(draftKey) ?? [])
     setQuote(null)
   }, [draftKey, pendingDraftKey])
 
   async function submit(intent: 'steer' | 'queue'): Promise<void> {
     if (sending.current) return
-    const text = draft.trim()
+    const trimmedStart = draft.trimStart()
+    const text = trimmedStart.trimEnd()
     if (!text && files.length === 0) return
     // Sending puts the keys away on a phone: the answer is what is being waited
     // for, and the field is one tap away when the next message is typed. A wide
@@ -320,19 +375,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     // The picked-out words travel as a quotation ahead of the reply, so what was
     // answered is part of the message and not only in the reader's head.
     const quoted = quote ? quotedLead(quote) : ''
+    const outgoing = quoted + text
+    const leadingTrim = draft.length - trimmedStart.length
+    const shift = quoted.length - leadingTrim
+    const mentions: MessageMentionRef[] = pickedMentions
+      .map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        start: item.start + shift,
+        end: item.end + shift,
+        token: item.token,
+      }))
+      .filter((item) => item.start >= 0 && item.end <= outgoing.length && outgoing.slice(item.start, item.end) === item.token)
+      .map(({ kind, id, start, end }) => ({ kind, id, start, end }))
     setUploadError('')
     sending.current = true
     try {
-      if (!await onSend(quoted + text, intent, files)) return
+      if (!await onSend(outgoing, intent, files, mentions.length > 0 ? mentions : undefined)) return
       if (drafts.current.get(draftKey) === draft) {
         drafts.current.delete(draftKey)
         try { localStorage.removeItem(`milo-draft:${draftKey}`); setDraftStorageError(false) }
         catch { setDraftStorageError(true) }
       }
       if (fileDrafts.current.get(draftKey) === files) fileDrafts.current.delete(draftKey)
+      mentionDrafts.current.delete(draftKey)
       if (shownKey.current === draftKey) {
         setDraft((current) => current === draft ? '' : current)
         setFiles((current) => current === files ? [] : current)
+        setPickedMentions([])
         setQuote((current) => current === quote ? null : current)
       }
     } finally {
@@ -342,17 +412,30 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   function choose(name: string): void {
     const next = `/${name} `
-    editDraft(next)
+    editDraft(next, [])
     setDismissed(next)
     ref.current?.focus()
   }
 
-  function chooseMention(name: string): void {
+  function chooseMention(option: NonNullable<typeof mention>['options'][number]): void {
     if (!mention) return
-    const inserted = `@${name} `
+    const token = `@${option.insert}`
+    const inserted = `${token} `
     const next = draft.slice(0, mention.start) + inserted + draft.slice(mention.end)
     const nextCaret = mention.start + inserted.length
-    editDraft(next)
+    const delta = next.length - draft.length
+    const kept = pickedMentions
+      .filter((item) => item.end <= mention.start || item.start >= mention.end)
+      .map((item) => (item.start >= mention.end ? { ...item, start: item.start + delta, end: item.end + delta } : item))
+    const picked: PickedMention = {
+      kind: option.kind,
+      id: option.kind === 'bot' ? option.bot.id : option.folder.id,
+      start: mention.start,
+      end: mention.start + token.length,
+      token,
+    }
+    const nextPicked = [...kept, picked].sort((a, b) => a.start - b.start)
+    editDraft(next, nextPicked)
     setCaret(nextCaret)
     setDismissed(next)
     requestAnimationFrame(() => {
@@ -379,7 +462,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
         event.preventDefault()
         if (palette.length > 0) choose(palette[highlight]!.name)
-        else chooseMention(mention!.options[highlight]!.name)
+        else chooseMention(mention!.options[highlight]!)
         return
       }
       if (event.key === 'Escape') {
@@ -503,8 +586,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         {palette.length > 0 && <div className="command-menu" role="listbox" aria-label="Commands">
           {palette.map((command, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={command.name} onMouseEnter={() => setHighlight(index)} onClick={() => choose(command.name)}><code className="command-name">/{command.name}</code><small>{command.hint}</small></button>)}
         </div>}
-        {palette.length === 0 && mention && <div className="command-menu" role="listbox" aria-label="Folders">
-          {mention.options.map((folder, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={folder.id} onMouseEnter={() => setHighlight(index)} onClick={() => chooseMention(folder.name)}><code className="command-name">@{folder.name}</code><small>{folder.path}</small></button>)}
+        {palette.length === 0 && mention && <div className="command-menu" role="listbox" aria-label="Mentions">
+          {mention.options.map((option, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={option.key} onMouseEnter={() => setHighlight(index)} onClick={() => chooseMention(option)}>
+            {option.kind === 'bot' ? (
+              <>
+                <BotAvatar avatar={botAvatarOf(option.bot)} size={18} />
+                <code className="command-name">@{option.insert}</code>
+                <small>{option.bot.name}</small>
+              </>
+            ) : (
+              <>
+                <code className="command-name">@{option.insert}</code>
+                <small>{option.folder.path}</small>
+              </>
+            )}
+          </button>)}
         </div>}
         {quote && <div className="composer-quote">
           <Icon name="quote" size={13} />

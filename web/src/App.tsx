@@ -16,8 +16,10 @@ import { Permissions } from './chat/Permissions.js'
 import { Email } from './email/Email.js'
 import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
-import type { ClientFrame, ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
+import type { BotAuthor, ClientFrame, ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, MessageMentionRef, SendTarget, ThinkingDisplay } from '@protocol'
+import type { CrewBot } from '../../src/core/crew.js'
 import type { SessionBackendKind, SessionBackendView } from '../../src/core/sessions/types.js'
+import { BotAvatar, botAvatarOf } from './crew/BotAvatar.js'
 import { SessionFolder } from './sessions/Folder.js'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
@@ -60,7 +62,7 @@ function readPendingMessages(): PendingMessage[] {
   } catch { return [] }
 }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
-type NewSessionContext = { project?: string; backend?: SessionBackendKind; firstMessage?: string; plan?: boolean }
+type NewSessionContext = { project?: string; backend?: SessionBackendKind; firstMessage?: string; plan?: boolean; botId?: string }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -135,6 +137,8 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
   const [sessionProject, setSessionProject] = useState<ProjectView | null>(null)
   const [backend, setBackend] = useState<SessionBackendView>({ kind: 'milo' })
+  const [sessionBot, setSessionBot] = useState<BotAuthor | null>(null)
+  const [crewBots, setCrewBots] = useState<CrewBot[]>([])
   const [folderOpen, setFolderOpen] = useState(false)
   const [inspectProject, setInspectProject] = useState<ProjectView | null>(null)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
@@ -227,11 +231,11 @@ export default function App() {
   /** Set when a session arrives, so opening one lands at its end, not its top. */
   const pinToEnd = useRef(false)
   /** The words a fork-and-resend owes: sent once the new session is connected. */
-  const pendingSend = useRef<string | null>(null)
+  const pendingSend = useRef<{ text: string; mentions?: MessageMentionRef[] } | null>(null)
   /** Set when an edit is being written: the next send redoes from that turn. */
   const editingTurn = useRef<number | null>(null)
   /** The live `send`, for the frame handler, which is defined before it. */
-  const sendRef = useRef<(text: string) => void>(() => {})
+  const sendRef = useRef<(text: string, mentions?: MessageMentionRef[]) => void>(() => {})
   /**
    * The tokens that have arrived since the last frame, by turn, and the frame that
    * will draw them. Gathering them here and drawing once a frame — rather than
@@ -240,6 +244,8 @@ export default function App() {
    */
   const pendingDeltas = useRef(new Map<string, PendingDelta[]>())
   const drawFrame = useRef<number | null>(null)
+  /** Active per-bot message row ids during a turn (keyed by turnId). */
+  const activeBotMessageIds = useRef(new Map<string, { messageId: string; index: number }>())
 
   /** Whether what is showing is a phone's layout; the composer's dock reads it. */
   const phone = usePhone()
@@ -448,6 +454,32 @@ export default function App() {
 
   useEffect(() => { void refreshProjects() }, [refreshProjects])
 
+  const refreshCrewBots = useCallback(async (): Promise<void> => {
+    try {
+      const list = await api<CrewBot[]>('crew')
+      setCrewBots(list)
+    } catch {
+      // Crew may be disabled in this runtime.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (crewTick >= 0) void refreshCrewBots()
+  }, [refreshCrewBots, crewTick])
+
+  useEffect(() => {
+    if (!sessionBot) return
+    const live = crewBots.find((bot) => bot.id === sessionBot.id)
+    if (!live) return
+    setSessionBot((current) =>
+      current &&
+      current.id === live.id &&
+      (current.name !== live.name || current.handle !== live.handle || current.avatar !== live.avatar)
+        ? { id: live.id, name: live.name, handle: live.handle, avatar: live.avatar }
+        : current,
+    )
+  }, [crewBots, sessionBot])
+
   const refreshSessions = useCallback(async (): Promise<void> => {
     const mine = ++sessionsSeq.current
     try {
@@ -548,10 +580,10 @@ export default function App() {
    * the prompt, and the prompt goes out once the new session is the one the socket
    * speaks to — so the answer is written afresh with the old one gone.
    */
-  const redo = useCallback(async (text: string, upToTurn: number): Promise<boolean> => {
+  const redo = useCallback(async (text: string, upToTurn: number, mentions?: MessageMentionRef[]): Promise<boolean> => {
     if (!sessionId) return false
     const nextChatId = randomUUID()
-    pendingSend.current = text
+    pendingSend.current = { text, mentions }
     try {
       const res = await api<{ id: string }>('fork-session', { chatId: nextChatId, sessionId, upToTurn })
       socket.close()
@@ -610,10 +642,12 @@ export default function App() {
         drawFrame.current = null
       }
       pendingDeltas.current = new Map()
+      activeBotMessageIds.current.clear()
       setBusy(false)
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
+      setSessionBot(frame.bot ?? null)
       // It is on the screen now, wherever it was opened from.
       markSeen(frame.sessionId)
       setThinking(frame.thinking)
@@ -646,7 +680,7 @@ export default function App() {
       if (pendingSend.current !== null) {
         const owed = pendingSend.current
         pendingSend.current = null
-        sendRef.current(owed)
+        sendRef.current(owed.text, owed.mentions)
       }
       return
     }
@@ -703,6 +737,7 @@ export default function App() {
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'jobs') { setJobs(frame.jobs); return }
     if (frame.type === 'turn-start') {
+      activeBotMessageIds.current.delete(frame.id)
       if (frame.requestId && pendingMessagesRef.current.some((item) => item.id === frame.requestId)) {
         try { changePending((items) => items.filter((item) => item.id !== frame.requestId)) }
         catch { setNotice({ text: 'Could not update saved messages on this device.', error: true }) }
@@ -720,14 +755,53 @@ export default function App() {
     }
     if (frame.type === 'event') {
       const event = frame.event
+      if (event.type === 'bot-start') {
+        const currentBot = activeBotMessageIds.current.get(frame.turnId)
+        if (!currentBot) {
+          activeBotMessageIds.current.set(frame.turnId, { messageId: frame.turnId, index: 1 })
+          const startedAt = Date.now()
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === frame.turnId
+                ? { ...message, bot: event.bot, waitingSince: startedAt }
+                : message,
+            ),
+          )
+        } else {
+          const nextId = `${frame.turnId}:bot:${currentBot.index}`
+          activeBotMessageIds.current.set(frame.turnId, { messageId: nextId, index: currentBot.index + 1 })
+          const startedAt = Date.now()
+          setMessages((current) => [
+            ...current,
+            { id: nextId, role: 'assistant', bot: event.bot, parts: [], waitingSince: startedAt, at: startedAt },
+          ])
+        }
+        return
+      }
+      const targetId = activeBotMessageIds.current.get(frame.turnId)?.messageId ?? frame.turnId
+      if (event.type === 'bot-end') {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === targetId
+              ? {
+                  ...message,
+                  parts: settled(message.parts),
+                  waitingSince: undefined,
+                  ...(event.status === 'error' && event.error ? { error: event.error } : {}),
+                }
+              : message,
+          ),
+        )
+        return
+      }
       if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
-        const buffered = pendingDeltas.current.get(frame.turnId) ?? []
+        const buffered = pendingDeltas.current.get(targetId) ?? []
         const kind = event.type === 'text-delta' ? 'text' : 'reasoning'
-        pendingDeltas.current.set(frame.turnId, withDelta(buffered, kind, event.delta))
+        pendingDeltas.current.set(targetId, withDelta(buffered, kind, event.delta))
         if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
         return
       }
-      setMessages((current) => current.map((message) => message.id === frame.turnId
+      setMessages((current) => current.map((message) => message.id === targetId
         ? applyEvent(message, event, frame.says)
         : message))
       return
@@ -735,8 +809,17 @@ export default function App() {
     if (frame.type === 'permission') { setPendingPermission(frame); return }
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
-      setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}), ...(frame.says ? { status: frame.says } : {}) }
+      const targetId = activeBotMessageIds.current.get(frame.id)?.messageId ?? frame.id
+      activeBotMessageIds.current.delete(frame.id)
+      setMessages((current) => current.map((message) => message.id === frame.id || message.id === targetId
+        ? {
+            ...message,
+            parts: settled(message.parts),
+            waitingSince: undefined,
+            ...(message.id === targetId && frame.raw ? { raw: frame.raw } : {}),
+            ...(message.id === targetId && frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}),
+            ...(message.id === targetId && frame.says ? { status: frame.says } : {}),
+          }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
@@ -748,7 +831,10 @@ export default function App() {
       return
     }
     if (frame.type === 'command-result') {
-      if (frame.sessionId) setSessionId(frame.sessionId)
+      if (frame.sessionId) {
+        if (frame.sessionId !== sessionIdRef.current) setSessionBot(frame.bot ?? null)
+        setSessionId(frame.sessionId)
+      }
       // A delivery lands in the chat that is open — a routine's answer, a finished
       // job's notice — and it is in front of the person only while that chat is showing.
       markSeenOnChat(frame.sessionId || sessionIdRef.current)
@@ -798,7 +884,7 @@ export default function App() {
   ): Promise<boolean> => {
     editingTurn.current = null
     const nextChatId = randomUUID()
-    pendingSend.current = context.firstMessage ?? null
+    pendingSend.current = context.firstMessage ? { text: context.firstMessage } : null
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
@@ -806,14 +892,18 @@ export default function App() {
         chatId: nextChatId,
         backend: context.backend ?? 'milo',
         ...(context.project ? { project: context.project } : {}),
+        ...(context.botId ? { botId: context.botId } : {}),
         ...(context.plan ? { plan: true } : {}),
       })
+      const targetBot = context.botId ? crewBots.find((entry) => entry.id === context.botId) : undefined
       socket.close()
+      activeBotMessageIds.current.clear()
       setMessages([])
       setPanel(null)
       setPlan(false)
       setSessionProject(context.project ? ((projects ?? []).find((p) => p.id === context.project) ?? null) : null)
       setBackend({ kind: context.backend ?? 'milo' })
+      setSessionBot(targetBot ? { id: targetBot.id, name: targetBot.name, handle: targetBot.handle, avatar: targetBot.avatar } : null)
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -824,7 +914,7 @@ export default function App() {
       fail(error)
       return false
     }
-  }, [socket, fail, setView, projects])
+  }, [socket, fail, setView, projects, crewBots])
 
   const newSessionHere = useCallback((): Promise<boolean> => newChat(), [newChat])
 
@@ -973,13 +1063,13 @@ export default function App() {
    * screen pins the destination a routine it asks for is made for, when that is
    * not this chat — the sentence then does not have to say it.
    */
-  const send = useCallback(async (text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget): Promise<boolean> => {
+  const send = useCallback(async (text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget, mentions?: MessageMentionRef[]): Promise<boolean> => {
     const sendingChat = chatId
     // An edit is a redo from the turn it was made on: the words go again with the
     // session forked to before them, rather than a second copy piling on top.
     if (editingTurn.current !== null && !files?.length) {
       const upToTurn = editingTurn.current
-      const sent = await redo(text, upToTurn)
+      const sent = await redo(text, upToTurn, mentions)
       if (sent) editingTurn.current = null
       return sent
     }
@@ -1007,7 +1097,7 @@ export default function App() {
         changePending((items) => items.filter((item) => item.id !== requestId))
         if (sessionIdRef.current === session) setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
       } else {
-        const steered = await socket.sendConfirmed(sendingChat, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) }, requestId)
+        const steered = await socket.sendConfirmed(sendingChat, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}), ...(mentions?.length ? { mentions } : {}) }, requestId)
         if (steered) {
           changePending((items) => items.filter((item) => item.id !== requestId))
           if (sessionIdRef.current === session) setMessages((current) => [...current, { id: `user-${requestId}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
@@ -1025,7 +1115,7 @@ export default function App() {
     return true
   }, [socket, fail, redo, chatId, sessionId, changePending])
 
-  useEffect(() => { sendRef.current = send }, [send])
+  useEffect(() => { sendRef.current = (text, mentions) => void send(text, 'queue', undefined, undefined, mentions) }, [send])
 
   /**
    * A routine asked for from the routines screen: always its own turn, and the
@@ -1351,6 +1441,12 @@ export default function App() {
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
         <div className="topbar-title">{view === 'chat' && <>
           {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
+          {sessionBot && (
+            <span className="topbar-bot" title={sessionBot.handle ? `@${sessionBot.handle}` : sessionBot.name}>
+              <BotAvatar avatar={botAvatarOf(sessionBot)} size={18} />
+              <span className="topbar-bot-name">{sessionBot.name}</span>
+            </span>
+          )}
           <div className={`topbar-project-group ${backend.kind === 'command-code' ? 'with-backend' : ''}`}>
             {backend.kind === 'command-code' && <span className="topbar-backend-wrap" title="Command Code Session"><SessionBackendMark backend="command-code" size={16} /></span>}
             <button
@@ -1378,7 +1474,7 @@ export default function App() {
         : view === 'analytics'
         ? <Analytics session={analyticsSession} onSessionChange={setAnalyticsSession} />
         : view === 'crew'
-        ? <Crew tick={crewTick} />
+        ? <Crew tick={crewTick} onChatWithBot={(botId) => void newChat({ botId })} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work' && workProject
@@ -1396,7 +1492,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} bots={sessionBot ? [] : crewBots} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={(text, intent, files, mentions) => send(text, intent, files, undefined, mentions)} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
           </div>
         </section>
         : null}

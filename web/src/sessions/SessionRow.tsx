@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { formatWhen } from '../../../src/core/time.js'
 import { Icon } from '../ui/Icons.js'
 import { SessionBackendMark } from '../ui/SessionBackendMark.js'
+import { BotAvatar, botAvatarOf } from '../crew/BotAvatar.js'
 import type { SessionSummary } from './types.js'
 
 /** What a row says under the name: how much has been said, and when. */
@@ -108,6 +109,12 @@ export function SessionRow({
           <span className="session-content">
             <span className="session-title-row">
               <span className="session-title">{session.label}</span>
+              {session.bot && (
+                <span className="session-bot-badge">
+                  <BotAvatar avatar={botAvatarOf(session.bot)} size={14} />
+                  <span>{session.bot.name}</span>
+                </span>
+              )}
               {session.surface === 'spotlight' && <span className="session-surface">Spotlight</span>}
             </span>
             <span className="session-preview-row">

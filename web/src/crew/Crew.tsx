@@ -38,13 +38,19 @@ function formatTiming(startedAt?: number, finishedAt?: number): string {
   return when
 }
 
-export function Crew({ tick = 0 }: { tick?: number }) {
+export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot?: (botId: string) => void }) {
   const [bots, setBots] = useState<CrewBot[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [work, setWork] = useState<WorkView[] | null>(null)
   const [selectedWork, setSelectedWork] = useState<string | null>(null)
   const [customizing, setCustomizing] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newHandle, setNewHandle] = useState('')
+  const [newInstructions, setNewInstructions] = useState('')
   const [name, setName] = useState('')
+  const [handle, setHandle] = useState('')
+  const [instructions, setInstructions] = useState('')
   const [guidance, setGuidance] = useState('')
   const [objective, setObjective] = useState('')
   const [scheduleKind, setScheduleKind] = useState('every')
@@ -60,8 +66,11 @@ export function Crew({ tick = 0 }: { tick?: number }) {
   const openBot = (entry: CrewBot) => {
     setSelectedWork(null)
     setOpenRun(null)
+    setCreating(false)
     setSelected(entry.id)
     setName(entry.name)
+    setHandle(entry.handle ?? '')
+    setInstructions(entry.instructions ?? '')
     setGuidance('')
     setCustomizing(false)
   }
@@ -85,17 +94,20 @@ export function Crew({ tick = 0 }: { tick?: number }) {
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const mine = ++generation.current
-    try {
-      const [nextBots, nextWork] = await Promise.all([
-        api<CrewBot[]>('crew', undefined, signal),
-        api<WorkView[]>('delegated-work', undefined, signal),
-      ])
-      if (mine !== generation.current) return
-      setBots(nextBots); setWork(nextWork); setRefreshError(null)
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return
-      if (mine === generation.current) setRefreshError(message(cause))
-    }
+    const [botsResult, workResult] = await Promise.allSettled([
+      api<CrewBot[]>('crew', undefined, signal),
+      api<WorkView[]>('delegated-work', undefined, signal),
+    ])
+    if (mine !== generation.current) return
+    const aborted = [botsResult, workResult].some(
+      (result) => result.status === 'rejected' && result.reason instanceof DOMException && result.reason.name === 'AbortError',
+    )
+    if (aborted) return
+    if (botsResult.status === 'fulfilled') setBots(botsResult.value)
+    if (workResult.status === 'fulfilled') setWork(workResult.value)
+    else if (botsResult.status === 'fulfilled') setWork((current) => current ?? [])
+    const failed = [botsResult, workResult].find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    setRefreshError(failed ? message(failed.reason) : null)
   }, [])
 
   useEffect(() => {
@@ -138,16 +150,45 @@ export function Crew({ tick = 0 }: { tick?: number }) {
   const bot = bots?.find((entry) => entry.id === selected)
   const botAvatar = bot ? botAvatarOf(bot) : null
   const botState = bot?.assignments.at(-1)?.state
+  const botRunning = bot?.assignments.some((entry) => entry.state === 'running') ?? false
   const job = work?.find((entry) => entry.id === selectedWork)
 
-  async function rename() {
+  async function createBot() {
+    if (!newName.trim()) return
+    setSaving(true)
+    try {
+      const created = await api<CrewBot>('crew-create', {
+        name: newName,
+        ...(newHandle.trim() ? { handle: newHandle } : {}),
+        ...(newInstructions.trim() ? { instructions: newInstructions } : {}),
+      })
+      generation.current += 1
+      setBots((current) => [created, ...(current ?? [])])
+      setCreating(false)
+      setNewName('')
+      setNewHandle('')
+      setNewInstructions('')
+      openBot(created)
+      setError(null)
+    }
+    catch (cause) { setError(message(cause)) }
+    finally { setSaving(false) }
+  }
+  async function saveProfile() {
     if (!bot || !name.trim()) return
     setSaving(true)
     try {
-      const updated = await api<CrewBot>('crew-rename', { id: bot.id, name })
+      const updated = await api<CrewBot>('crew-update', {
+        id: bot.id,
+        name,
+        handle,
+        instructions,
+      })
       generation.current += 1
       setBots((current) => current?.map((item) => (item.id === updated.id ? updated : item)) ?? current)
       setName(updated.name)
+      setHandle(updated.handle ?? '')
+      setInstructions(updated.instructions ?? '')
       setError(null)
     }
     catch (cause) { setError(message(cause)) }
@@ -176,6 +217,21 @@ export function Crew({ tick = 0 }: { tick?: number }) {
     if (!bot || !guidance.trim()) return
     setSaving(true)
     try { await api('crew-guide', { id: bot.id, text: guidance }); setGuidance(''); await refresh() }
+    catch (cause) { setError(message(cause)) }
+    finally { setSaving(false) }
+  }
+  async function removeBot() {
+    if (!bot || botRunning) return
+    if (!window.confirm(`Remove bot “${bot.name}” and its assignment history?`)) return
+    setSaving(true)
+    try {
+      await api('crew-remove', { id: bot.id })
+      generation.current += 1
+      setBots((current) => current?.filter((item) => item.id !== bot.id) ?? current)
+      setSelected(null)
+      setCustomizing(false)
+      setError(null)
+    }
     catch (cause) { setError(message(cause)) }
     finally { setSaving(false) }
   }
@@ -268,8 +324,10 @@ export function Crew({ tick = 0 }: { tick?: number }) {
           </div>
         </div></section>
       })}
-    </> : bots.length === 0 && work.length === 0 ? <div className="panel-empty">
-      <h3>No bots yet</h3><p className="panel-empty-copy">Ask Milo for help with a task. When it delegates, the bots appear here.</p>
+    </> : !creating && bots.length === 0 && work.length === 0 ? <div className="panel-empty">
+      <h3>No bots yet</h3>
+      <p className="panel-empty-copy">Create a bot with permanent instructions to chat with it or mention it with @, or ask Milo to delegate a task.</p>
+      <button className="button primary" type="button" onClick={() => setCreating(true)}>New bot</button>
     </div> : bot && botAvatar ? <>
       <div className="crew-bot-hero">
         <BotAvatar avatar={botAvatar} state={botState} size={76} />
@@ -278,18 +336,50 @@ export function Crew({ tick = 0 }: { tick?: number }) {
             <h3>{bot.name}</h3>
             {botState && <span className={`crew-badge ${botState}`}>{botState}</span>}
           </div>
-          <span className="routine-row-meta">{SHAPE_LABELS[botAvatar.shape]} · {EYES_LABELS[botAvatar.eyes]} eyes{botAvatar.accessory !== 'none' ? ` · ${ACCESSORY_LABELS[botAvatar.accessory]}` : ''}</span>
-          <form className="crew-inline-form" onSubmit={(event) => { event.preventDefault(); void rename() }}>
-            <label className="sr-only" htmlFor="crew-name">Name</label>
-            <input id="crew-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Bot name" />
-            <button className="button primary" type="submit" disabled={saving || !name.trim() || name.trim() === bot.name}>Save</button>
-          </form>
+          <span className="routine-row-meta">
+            {bot.handle ? <><span className="crew-handle">@{bot.handle}</span> · </> : null}
+            {SHAPE_LABELS[botAvatar.shape]} · {EYES_LABELS[botAvatar.eyes]} eyes{botAvatar.accessory !== 'none' ? ` · ${ACCESSORY_LABELS[botAvatar.accessory]}` : ''}
+          </span>
         </div>
         <div className="crew-hero-actions">
+          {onChatWithBot && <button className="button primary" type="button" disabled={saving} onClick={() => onChatWithBot(bot.id)}>Chat with bot</button>}
           <button className="button" type="button" disabled={saving} onClick={() => void updateAvatar({ shuffle: true })}>Shuffle avatar</button>
           <button className="button" type="button" onClick={() => setCustomizing((current) => !current)}>{customizing ? 'Done' : 'Customize'}</button>
+          <button
+            className="button danger"
+            type="button"
+            disabled={saving || botRunning}
+            title={botRunning ? 'Stop the bot before removing it.' : 'Remove this bot and its assignment history'}
+            onClick={() => void removeBot()}
+          >
+            Remove bot
+          </button>
         </div>
       </div>
+      <form className="crew-profile-card" onSubmit={(event) => { event.preventDefault(); void saveProfile() }}>
+        <div className="crew-profile-grid">
+          <Field label="Display name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Bot display name" /></Field>
+          <Field label="Mention handle (@name)"><input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="e.g. researcher" /></Field>
+        </div>
+        <Field label="Permanent instructions">
+          <textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Define this bot's role, perspective, and style. Folder rules and Session permissions still apply." />
+        </Field>
+        <div className="crew-actions-row">
+          <button
+            className="button primary"
+            type="submit"
+            disabled={
+              saving ||
+              !name.trim() ||
+              (name.trim() === bot.name &&
+                handle.trim().replace(/^@+/, '').toLowerCase() === (bot.handle ?? '') &&
+                instructions.trim() === (bot.instructions ?? ''))
+            }
+          >
+            Save profile
+          </button>
+        </div>
+      </form>
       {customizing && <section className="crew-avatar-studio" aria-label="Bot appearance">
         <div className="crew-avatar-group">
           <span className="crew-avatar-label">Shape</span>
@@ -331,6 +421,7 @@ export function Crew({ tick = 0 }: { tick?: number }) {
         })()}
       </div>}
       <h3 className="crew-section-title">Assignments</h3>
+      {bot.assignments.length === 0 && <p className="routine-row-meta">No missions yet. Mention @{bot.handle ?? bot.name.toLowerCase()} in a Session or click Chat with bot above.</p>}
       {[...bot.assignments].reverse().map((assignment) => {
         const timing = formatTiming(assignment.startedAt, assignment.finishedAt)
         return <section className="crew-history" key={assignment.id}>
@@ -346,6 +437,21 @@ export function Crew({ tick = 0 }: { tick?: number }) {
         </section>
       })}
     </> : <>
+    <div className="crew-toolbar">
+      <button className="button primary" type="button" onClick={() => setCreating((current) => !current)}>{creating ? 'Cancel' : 'New bot'}</button>
+    </div>
+    {creating && <form className="crew-profile-card" onSubmit={(event) => { event.preventDefault(); void createBot() }}>
+      <div className="crew-profile-grid">
+        <Field label="Display name"><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Architect" /></Field>
+        <Field label="Mention handle (optional)"><input value={newHandle} onChange={(event) => setNewHandle(event.target.value)} placeholder="e.g. architect" /></Field>
+      </div>
+      <Field label="Permanent instructions (optional)">
+        <textarea value={newInstructions} onChange={(event) => setNewInstructions(event.target.value)} placeholder="Role, perspective, and style for conversations and missions." />
+      </Field>
+      <div className="crew-actions-row">
+        <button className="button primary" type="submit" disabled={saving || !newName.trim()}>Create bot</button>
+      </div>
+    </form>}
     {bots.length > 0 && <>
       <h3 className="crew-section-title">Bots</h3>
       <div className="crew-grid">{bots.map((entry) => {
@@ -359,9 +465,13 @@ export function Crew({ tick = 0 }: { tick?: number }) {
                 <span className="routine-row-name">{entry.name}</span>
                 {last?.state && <span className={`crew-badge ${last.state}`}>{last.state}</span>}
               </div>
-              <span className="crew-bot-card-model">{last?.provider ? `${last.provider} · ` : ''}{last?.model ?? SHAPE_LABELS[avatar.shape]}</span>
+              <span className="crew-bot-card-model">
+                {entry.handle ? `@${entry.handle} · ` : ''}
+                {last?.provider ? `${last.provider} · ` : ''}{last?.model ?? SHAPE_LABELS[avatar.shape]}
+              </span>
             </div>
           </div>
+          {entry.instructions && !last?.mission && <p className="crew-instructions-preview">{entry.instructions}</p>}
           {last?.mission && <p className="crew-bot-card-mission">{last.mission}</p>}
           {last?.report && last.state !== 'running' && <p className="crew-bot-card-report">{last.report}</p>}
         </button>
