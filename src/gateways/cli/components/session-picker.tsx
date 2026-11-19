@@ -36,6 +36,7 @@ export function SessionPicker({
     if (terms.length === 0) return sessions
     return sessions.filter((session) => {
       const projectName = session.project ? (projectNames?.[session.project] ?? '') : ''
+      const botName = session.bot?.name ?? ''
       const haystack = [
         session.id,
         session.title ?? '',
@@ -43,6 +44,8 @@ export function SessionPicker({
         session.preview,
         session.recap ?? '',
         projectName,
+        botName,
+        session.bot?.handle ?? '',
       ]
         .join(' ')
         .toLowerCase()
@@ -115,10 +118,12 @@ export function SessionPicker({
           const absolute = windowStart + offset
           const isSelected = absolute === safeSelected
           const isCurrent = Boolean(currentSessionId && session.id === currentSessionId)
-          const label = sessionLabel(session)
+          const label = sessionLabel(session) || (session.bot ? `Chat with ${session.bot.name}` : '')
           const projectName = session.project ? projectNames?.[session.project] : undefined
+          const botTag = session.bot ? `bot:${session.bot.name}` : undefined
           const when = formatWhen(session.updatedAt)
           const baseMetaParts = [
+            botTag,
             projectName,
             `${session.messageCount} ${session.messageCount === 1 ? 'msg' : 'msgs'}`,
             when,

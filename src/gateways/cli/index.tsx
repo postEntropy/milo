@@ -13,7 +13,7 @@ import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js
 import { announceJob, shouldAnnounce } from '../../core/jobs/index.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import { PERMISSION_LABELS, type PermissionMode } from '../../core/tools/permission.js'
-import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
+import { DEFAULT_REASONING_EFFORT, type BotAuthor, type ReasoningEffort } from '../../core/providers/types.js'
 import { shortModel } from '../model-label.js'
 import type { Session } from '../../core/session.js'
 import { itemsFromMessages } from './history-items.js'
@@ -93,6 +93,7 @@ export function Shell({
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionFolder, setSessionFolder] = useState<string | null>(null)
   const [sessionBackend, setSessionBackend] = useState<string>('milo')
+  const [sessionBot, setSessionBot] = useState<BotAuthor | null>(null)
   const [maxInputTokens, setMaxInputTokens] = useState<number | undefined>(undefined)
   const [mouseOff, setMouseOff] = useState(false)
   const sessionIdRef = useRef<string | null>(null)
@@ -111,6 +112,7 @@ export function Shell({
       setSessionId(session.id)
       setSessionFolder(session.project?.ok ? session.project.project.path : null)
       setSessionBackend(session.backend?.kind ?? 'milo')
+      setSessionBot(session.bot ?? null)
       const stats = typeof session.stats === 'function' ? session.stats() : undefined
       setMaxInputTokens(stats?.maxInputTokens)
       let messages = Array.isArray(session.messages) ? session.messages : []
@@ -370,6 +372,7 @@ export function Shell({
           onSessionChange={setSessionId}
           onSessionFolderChange={setSessionFolder}
           onSessionBackendChange={setSessionBackend}
+          onSessionBotChange={setSessionBot}
           onMaxInputTokensChange={setMaxInputTokens}
           onConfigRefresh={refreshConfig}
           theme={activeTheme}
@@ -377,6 +380,7 @@ export function Shell({
           sessionId={sessionId}
           sessionFolder={sessionFolder}
           sessionBackend={sessionBackend}
+          sessionBot={sessionBot}
           maxInputTokens={maxInputTokens}
           mouseOff={mouseOff}
           onMouseOffChange={setMouseOff}

@@ -29,22 +29,28 @@ interface ToolOutcome {
 export function itemsFromMessages(messages: Message[], display: DisplayConfig = DEFAULT_DISPLAY): Item[] {
   const items: Item[] = []
   const outcomes = collectOutcomes(messages)
+  let lastBotId: string | undefined
 
   for (const message of messages) {
     if (message.internal) continue
 
     if (message.role === 'user') {
+      lastBotId = undefined
       pushUserMessage(message, items)
       continue
     }
 
     if (message.role === 'assistant' && message.routine) {
+      lastBotId = undefined
       pushRoutineMessage(message, items)
       continue
     }
 
     if (message.role === 'assistant') {
-      pushAssistantMessage(message, outcomes, display, items)
+      const botId = message.bot?.id
+      const includeBotHeader = Boolean(message.bot && botId !== lastBotId)
+      lastBotId = botId
+      pushAssistantMessage(message, outcomes, display, items, includeBotHeader)
     }
   }
 
@@ -110,7 +116,11 @@ function pushAssistantMessage(
   outcomes: Map<string, ToolOutcome>,
   display: DisplayConfig,
   items: Item[],
+  includeBotHeader = Boolean(message.bot),
 ): void {
+  if (includeBotHeader && message.bot) {
+    items.push({ kind: 'bot', bot: message.bot })
+  }
   const thoughtHeader =
     message.thoughtMs !== undefined && message.thoughtMs >= 1000
       ? `✻ Thought for ${formatSeconds(message.thoughtMs / 1000)}`
@@ -202,6 +212,9 @@ function pushAssistantMessage(
 
   if (message.verification) {
     items.push({ kind: 'verification', ok: message.verification.ok, text: message.verification.text })
+  }
+  if (message.error) {
+    items.push({ kind: 'error', text: message.error })
   }
 }
 

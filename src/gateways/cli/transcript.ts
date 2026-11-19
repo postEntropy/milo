@@ -1,5 +1,7 @@
 import type { FileChange } from '../../core/change.js'
+import { formatBotAvatarBadge, resolveBotAvatar } from '../../core/crew.js'
 import { highlight, languageOf, type CodeRole, type CodeRun } from '../../core/highlight.js'
+import type { BotAuthor } from '../../core/providers/types.js'
 import { todoMark, type TodoItem } from '../../core/todos.js'
 import { changeCounts, toolDisplayName, toolIcon, toolInput } from '../tool-line.js'
 import { theme, type ThemeColor, type TuiTheme } from './theme.js'
@@ -34,6 +36,7 @@ export interface Line {
 
 export type Item =
   | { kind: 'user'; text: string }
+  | { kind: 'bot'; bot: BotAuthor }
   | { kind: 'assistant'; text: string }
   | {
       kind: 'tool'
@@ -203,7 +206,11 @@ export function buildLines(items: Item[], width: number, activeTheme: TuiTheme =
   items.forEach((item, index) => {
     // Consecutive tool calls are one burst of work, not two paragraphs.
     const previous = items[index - 1]
-    if (index > 0 && !(item.kind === 'tool' && previous?.kind === 'tool')) {
+    if (
+      index > 0 &&
+      !(item.kind === 'tool' && previous?.kind === 'tool') &&
+      previous?.kind !== 'bot'
+    ) {
       lines.push({ text: '' })
     }
 
@@ -248,6 +255,19 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
         push(`${prefix}${text}`, {
           color: activeTheme.surfaceText,
           background: activeTheme.surface,
+        })
+      }
+      break
+    }
+    case 'bot': {
+      const badge = formatBotAvatarBadge(resolveBotAvatar(item.bot))
+      const label = item.bot.handle
+        ? `${badge} ${item.bot.name} (@${item.bot.handle})`
+        : `${badge} ${item.bot.name}`
+      for (const text of wrapText(label, width)) {
+        push(text, {
+          color: activeTheme.accent,
+          segments: [{ text, bold: true, color: activeTheme.accent }],
         })
       }
       break

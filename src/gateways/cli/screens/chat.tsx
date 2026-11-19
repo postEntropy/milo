@@ -10,12 +10,14 @@ import type { MemoryScope } from '../../../core/memory/index.js'
 import { byRecentUse, projectNames, readProjects } from '../../../core/projects.js'
 import type {
   AudioPart,
+  BotAuthor,
   DocumentPart,
   ImagePart,
   Message,
   ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
+import { formatBotAvatarBadge, normalizeBotHandle, resolveBotAvatar } from '../../../core/crew.js'
 import { incomingMime, MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
 import { saveCommandCodeAttachments } from '../../../core/command-code-attachments.js'
 import { prepareTurnMedia } from '../../media.js'
@@ -143,6 +145,9 @@ export interface ChatScreenProps {
   /** Active backend identifier for the current session (e.g. 'milo' or 'command-code'). */
   sessionBackend?: string
   onSessionBackendChange?: (backend: string) => void
+  /** Bound Crew bot for direct bot conversations, when active. */
+  sessionBot?: BotAuthor | null
+  onSessionBotChange?: (bot: BotAuthor | null) => void
   /** Model context budget for the active session, when known. */
   maxInputTokens?: number
   onMaxInputTokensChange?: (tokens: number | undefined) => void
@@ -201,6 +206,7 @@ export function ChatScreen({
   onSessionChange,
   onSessionFolderChange,
   onSessionBackendChange,
+  onSessionBotChange,
   onMaxInputTokensChange,
   onConfigRefresh,
   theme: themeProp,
@@ -208,6 +214,7 @@ export function ChatScreen({
   sessionId,
   sessionFolder,
   sessionBackend,
+  sessionBot,
   maxInputTokens,
   mouseOff: mouseOffProp,
   onMouseOffChange,
@@ -251,6 +258,7 @@ export function ChatScreen({
   const [localMouseOff, setLocalMouseOff] = useState(mouseOffProp ?? false)
   const [localFolder, setLocalFolder] = useState<string | null>(sessionFolder ?? null)
   const [localBackend, setLocalBackend] = useState<string>(sessionBackend ?? 'milo')
+  const [localBot, setLocalBot] = useState<BotAuthor | null>(sessionBot ?? null)
   const [localMaxTokens, setLocalMaxTokens] = useState<number | undefined>(maxInputTokens)
 
   useEffect(() => {
@@ -266,12 +274,17 @@ export function ChatScreen({
   }, [sessionBackend])
 
   useEffect(() => {
+    if (sessionBot !== undefined) setLocalBot(sessionBot)
+  }, [sessionBot])
+
+  useEffect(() => {
     if (maxInputTokens !== undefined) setLocalMaxTokens(maxInputTokens)
   }, [maxInputTokens])
 
   const mouseOff = mouseOffProp !== undefined ? mouseOffProp : localMouseOff
   const activeFolder = sessionFolder !== undefined ? sessionFolder : localFolder
   const activeBackend = sessionBackend !== undefined ? sessionBackend : localBackend
+  const activeBot = sessionBot !== undefined ? sessionBot : localBot
   const budgetTokens = maxInputTokens !== undefined ? maxInputTokens : localMaxTokens
 
   const updateMouseOff = useCallback(
@@ -296,6 +309,14 @@ export function ChatScreen({
       onSessionBackendChange?.(next)
     },
     [onSessionBackendChange],
+  )
+
+  const updateBot = useCallback(
+    (next: BotAuthor | null) => {
+      setLocalBot(next)
+      onSessionBotChange?.(next)
+    },
+    [onSessionBotChange],
   )
 
   const updateMaxTokens = useCallback(
@@ -676,6 +697,7 @@ export function ChatScreen({
       messages?: Message[]
       project?: { ok: true; project: { path: string } } | { ok: false; error: string }
       backend?: { kind: string }
+      bot?: BotAuthor
       stats?: () => SessionStats
       refreshHistory?: () => Promise<Message[]>
     },
@@ -697,6 +719,7 @@ export function ChatScreen({
     const nextFolder = nextSession.project?.ok ? nextSession.project.project.path : null
     updateFolder(nextFolder)
     updateBackend(nextSession.backend?.kind ?? 'milo')
+    updateBot(nextSession.bot ?? null)
     const nextStats = nextSession.stats?.()
     updateMaxTokens(nextStats?.maxInputTokens)
     if (nextStats && nextStats.tokens > 0) setContextTokens(nextStats.tokens)
@@ -754,8 +777,8 @@ export function ChatScreen({
           return { model: runtime.model }
         }
       : undefined,
-    newSession: async (title) => {
-      const nextSession = await runtime.newSession(scope, title)
+    newSession: async (title, opts) => {
+      const nextSession = await runtime.newSession(scope, title, opts)
       await applySwitchedSession(nextSession, false)
       return nextSession
     },
@@ -788,10 +811,13 @@ export function ChatScreen({
     skills: () => runtime.skills ?? [],
     jobs: () => runtime.jobs?.list(sessionId ?? undefined) ?? [],
     crew: runtime.crew ? () => runtime.crew!.list() : undefined,
+    createCrewBot: runtime.crew ? (botInput) => runtime.crew!.create(botInput) : undefined,
+    updateCrewProfile: runtime.crew ? (id, patch) => runtime.crew!.updateProfile(id, patch) : undefined,
     renameCrewBot: runtime.crew ? (id, name) => runtime.crew!.rename(id, name) : undefined,
     updateCrewAvatar: runtime.crew ? (id, patch) => runtime.crew!.updateAvatar(id, patch) : undefined,
     stopCrewBot: runtime.crew ? (id) => runtime.crew!.stop(id) : undefined,
     guideCrewBot: runtime.crew ? (id, text) => runtime.crew!.guide(id, text) : undefined,
+    removeCrewBot: runtime.crew ? (id) => runtime.crew!.remove(id) : undefined,
     delegatedWork: runtime.delegatedWork ? () => runtime.delegatedWork!.list() : undefined,
     controlDelegatedWork: runtime.delegatedWork ? (id, action) => runtime.delegatedWork!.control(id, action) : undefined,
     killJob: (id) => runtime.jobs?.kill(id, sessionId ?? undefined) ?? false,
@@ -928,6 +954,33 @@ export function ChatScreen({
     let reasoningChars = 0
     /** Thinking too fast to be worth a line, kept in case it was the answer. */
     const dropped: string[] = []
+    let botTurnHandled = false
+    let activeBot: BotAuthor | null = null
+    const flushBotTail = () => {
+      const trailing = [...dropped, reasoningRef.current.trim()].filter(Boolean)
+      if (trailing.length > 0) {
+        const seconds = (Date.now() - waitingSince) / 1000
+        push({
+          kind: 'reasoning',
+          // Same rule as any other wait: under a second there is nothing to say.
+          header: seconds < 1 ? '' : `✻ Thought for ${formatSeconds(seconds)}`,
+          text: trailing.join('\n\n'),
+        })
+        reasoningRef.current = ''
+        setReasoning('')
+      }
+      dropped.length = 0
+      if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
+        push({
+          kind: 'info',
+          text:
+            '⚠ no answer came back: this model sends everything it says as reasoning, and ' +
+            '/thinking collapsed hides it. MILO_DEBUG=1 prints what the wire carried.',
+        })
+      }
+      commitLive()
+      draftUiActiveRef.current = false
+    }
     const stopWaiting = () => {
       flushStream()
       const seconds = (Date.now() - waitingSince) / 1000
@@ -1087,6 +1140,24 @@ export function ChatScreen({
               push(notice)
             }
           },
+          onBotStart: (bot) => {
+            if (activeBot) flushBotTail()
+            botTurnHandled = true
+            activeBot = bot
+            answered = false
+            reasoningChars = 0
+            dropped.length = 0
+            waitingSince = Date.now()
+            setToolName('')
+            setPhase('thinking')
+            push({ kind: 'bot', bot })
+          },
+          onBotEnd: () => {
+            flushStream()
+            flushBotTail()
+            activeBot = null
+            waitingSince = Date.now()
+          },
           onDone: (finishReason) => {
             flushStream()
             // A capped answer otherwise looks like a complete one.
@@ -1122,40 +1193,12 @@ export function ChatScreen({
       setQueued(queueRef.current.length)
     }
 
-    // Reasoning that nothing followed: no line under it, no tool after it. That
-    // is not a thought on the way to an answer, it is what the model said — one
-    // that answers in the thinking channel says everything there — so it is
-    // kept. What the earlier waits said but never reported rides along, before
-    // it, so a turn keeps its own order. Dropping any of this made a turn look
-    // like it produced nothing, moments after the text had scrolled past the
-    // screen.
-    const trailing = [...dropped, reasoningRef.current.trim()].filter(Boolean)
-    if (trailing.length > 0) {
-      const seconds = (Date.now() - waitingSince) / 1000
-      push({
-        kind: 'reasoning',
-        // Same rule as any other wait: under a second there is nothing to say.
-        header: seconds < 1 ? '' : `✻ Thought for ${formatSeconds(seconds)}`,
-        text: trailing.join('\n\n'),
-      })
-      reasoningRef.current = ''
-      setReasoning('')
+    if (!botTurnHandled || activeBot) {
+      flushBotTail()
+    } else {
+      commitLive()
+      draftUiActiveRef.current = false
     }
-
-    // Nothing came back in the answer channel, and the display hid what did: a turn
-    // that shows a user nothing at all has to at least say why, or the provider
-    // putting both channels in one field looks like Milo having gone quiet.
-    if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
-      push({
-        kind: 'info',
-        text:
-          '⚠ no answer came back: this model sends everything it says as reasoning, and ' +
-          '/thinking collapsed hides it. MILO_DEBUG=1 prints what the wire carried.',
-      })
-    }
-
-    commitLive()
-    draftUiActiveRef.current = false
     setReasoning('')
     setToolName('')
     setPermission(null)
@@ -1281,10 +1324,50 @@ export function ChatScreen({
    */
   const submit = async (raw: string, steer: boolean) => {
     const rawText = raw.trim()
-    const fileTokens = [...rawText.matchAll(/(?:^|\s)@(?:"([^"]+)"|'([^']+)'|([^\s]+))/g)]
-      .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
-      .filter(Boolean)
-    const text = rawText.replace(/(?:^|\s)@(?:"[^"]+"|'[^']+'|[^\s]+)/g, ' ').trim()
+    const crewHandles = new Set(
+      (runtime.crew?.list() ?? [])
+        .map((bot) => bot.handle)
+        .filter((handle): handle is string => Boolean(handle)),
+    )
+    const tokenPattern = /(^|\s)(@(?:"([^"]+)"|'([^']+)'|([^\s]+)))/g
+    const attachmentBase = activeFolder ?? baseCwd
+    const fileTokens: string[] = []
+    const fileSpans: Array<{ start: number; end: number }> = []
+    for (const match of rawText.matchAll(tokenPattern)) {
+      const lead = match[1] ?? ''
+      const tokenStart = (match.index ?? 0) + lead.length
+      const fullToken = match[2] ?? ''
+      const quoted = match[3] ?? match[4]
+      const bare = match[5] ?? ''
+      const candidate = quoted ?? bare
+      if (!candidate) continue
+      let isFile = quoted !== undefined
+      if (!isFile) {
+        const normalizedHandle = normalizeBotHandle(bare)
+        if (normalizedHandle && crewHandles.has(normalizedHandle)) {
+          isFile = false
+        } else if (!/[./\\~]/.test(bare)) {
+          try {
+            const info = await stat(resolveToolPath(attachmentBase, bare))
+            isFile = info.isFile()
+          } catch {
+            isFile = false
+          }
+        } else {
+          isFile = true
+        }
+      }
+      if (isFile) {
+        fileTokens.push(candidate)
+        fileSpans.push({ start: match.index ?? 0, end: tokenStart + fullToken.length })
+      }
+    }
+    let text = rawText
+    for (let i = fileSpans.length - 1; i >= 0; i -= 1) {
+      const span = fileSpans[i]!
+      text = `${text.slice(0, span.start)} ${text.slice(span.end)}`
+    }
+    text = text.trim()
     if (!text && fileTokens.length === 0) return
     let images: ImagePart[] = []
     let audio: AudioPart[] = []
@@ -1293,7 +1376,6 @@ export function ChatScreen({
     let mediaNotices: string[] | undefined
     let prompt = text
     let mediaModel: string | undefined
-    const attachmentBase = activeFolder ?? baseCwd
     try {
       if (fileTokens.length) {
         const sizes = await Promise.all(
@@ -1421,6 +1503,9 @@ export function ChatScreen({
       : [{ text: 'Milo', color: activeTheme.muted }]),
     ...(activeBackend && activeBackend !== 'milo'
       ? [{ text: activeBackend, color: activeTheme.secondary }]
+      : []),
+    ...(activeBot
+      ? [{ text: `${formatBotAvatarBadge(resolveBotAvatar(activeBot))} ${activeBot.name}`, color: activeTheme.accent, bold: true }]
       : []),
     ...(mode !== 'ask'
       ? [
@@ -1596,6 +1681,7 @@ export function ChatScreen({
           onScroll={scrollBy}
           onPopupRowsChange={setPopupRows}
           commands={COMMAND_CATALOG}
+          bots={activeBot ? [] : (runtime.crew?.list() ?? [])}
           suggestFiles={suggestFiles}
           busy={busy}
           disabled={Boolean(permission || activePicker)}
@@ -1648,6 +1734,8 @@ interface EventHandlers {
   onWaited: (ms: number) => void
   /** The session was not as this copy had it: turns arrived, or went, elsewhere. */
   onRebased: (event: { added: number; removed: number; compacted: boolean }) => void
+  onBotStart: (bot: BotAuthor) => void
+  onBotEnd: (bot: BotAuthor, status: 'done' | 'error' | 'stopped', error?: string) => void
   onDone: (finishReason: string) => void
   onAborted: () => void
   onError: (message: string) => void
@@ -1699,6 +1787,12 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       break
     case 'rebased':
       handlers.onRebased(event)
+      break
+    case 'bot-start':
+      handlers.onBotStart(event.bot)
+      break
+    case 'bot-end':
+      handlers.onBotEnd(event.bot, event.status, event.error)
       break
     case 'done':
       handlers.onDone(event.finishReason)

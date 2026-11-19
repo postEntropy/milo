@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useInput, usePaste } from 'ink'
+import { formatBotAvatarBadge, resolveBotAvatar } from '../../../core/crew.js'
+import type { BotAuthor } from '../../../core/providers/types.js'
 import type { CommandEntry } from '../../command-catalog.js'
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { theme, type TuiTheme } from '../theme.js'
@@ -12,6 +14,7 @@ export interface ComposerProps {
   onScroll?: (delta: number) => void
   onPopupRowsChange?: (rows: number) => void
   commands?: CommandEntry[]
+  bots?: BotAuthor[]
   suggestFiles?: (query: string) => string[] | Promise<string[]>
   busy?: boolean
   disabled?: boolean
@@ -366,6 +369,7 @@ export function Composer({
   onScroll,
   onPopupRowsChange,
   commands,
+  bots = [],
   suggestFiles,
   busy = false,
   disabled = false,
@@ -455,10 +459,31 @@ export function Composer({
     }
   }, [suggestFiles, mentionQuery, itemCap])
 
+  const botMatches = useMemo(() => {
+    if (!atMention || itemCap <= 0 || bots.length === 0) return []
+    const needle = mentionQuery?.trim().toLowerCase() ?? ''
+    return bots
+      .filter((bot) => {
+        const handle = bot.handle?.toLowerCase() ?? ''
+        if (!handle) return false
+        return !needle || handle.includes(needle) || bot.name.toLowerCase().includes(needle)
+      })
+      .slice(0, itemCap)
+  }, [atMention, itemCap, bots, mentionQuery])
+
+  const mentionItems = useMemo(() => {
+    if (!atMention) return []
+    const remaining = Math.max(0, itemCap - botMatches.length)
+    return [
+      ...botMatches.map((bot) => ({ kind: 'bot' as const, bot, insertion: bot.handle! })),
+      ...fileMatches.slice(0, remaining).map((filePath) => ({ kind: 'file' as const, path: filePath, insertion: filePath })),
+    ]
+  }, [atMention, itemCap, botMatches, fileMatches])
+
   const popupKind: 'command' | 'file' | null =
     commandMatches.length > 0
       ? 'command'
-      : atMention && fileMatches.length > 0
+      : atMention && mentionItems.length > 0
         ? 'file'
         : null
   const popupKey =
@@ -469,7 +494,7 @@ export function Composer({
         : null
   const popupOpen = popupKind !== null && popupKey !== dismissedKey
 
-  const popupCount = popupKind === 'command' ? commandMatches.length : fileMatches.length
+  const popupCount = popupKind === 'command' ? commandMatches.length : mentionItems.length
   const popupTotalRows = popupOpen ? popupCount + (hasPopupChrome ? 2 : 0) : 0
   const safePopupIndex = Math.min(popupIndex, Math.max(0, popupCount - 1))
 
@@ -540,8 +565,8 @@ export function Composer({
           const picked = commandMatches[safePopupIndex]
           if (picked) completeCommand(picked)
         } else if (popupKind === 'file') {
-          const picked = fileMatches[safePopupIndex]
-          if (picked) completeFile(picked)
+          const picked = mentionItems[safePopupIndex]
+          if (picked) completeFile(picked.insertion)
         }
         return
       }
@@ -564,9 +589,9 @@ export function Composer({
               return
             }
           } else if (popupKind === 'file') {
-            const picked = fileMatches[safePopupIndex]
+            const picked = mentionItems[safePopupIndex]
             if (picked) {
-              completeFile(picked)
+              completeFile(picked.insertion)
               return
             }
           }
@@ -719,7 +744,13 @@ export function Composer({
   const promptColor = busy ? undefined : activeTheme.surfaceText
 
   const popupTitle =
-    popupKind === 'command' ? `Commands (${commandResult.total})` : `Files (${totalFileMatches})`
+    popupKind === 'command'
+      ? `Commands (${commandResult.total})`
+      : botMatches.length > 0 && fileMatches.length === 0
+        ? `Crew bots (${botMatches.length})`
+        : botMatches.length > 0
+          ? `Bots & Files (${botMatches.length + totalFileMatches})`
+          : `Files (${totalFileMatches})`
   const popupHint = 'Tab complete'
   const showPopupHint = popupWidth >= popupTitle.length + popupHint.length + 2
   const cmdLabels = commandMatches.map((cmd) => `/${cmd.name}${cmd.usage ?? ''}`)
@@ -769,14 +800,18 @@ export function Composer({
                   </Box>
                 )
               })
-            : fileMatches.map((filePath, index) => {
+            : mentionItems.map((entry, index) => {
                 const selected = index === safePopupIndex
                 const prefix = selected ? '▸ ' : '  '
-                const label = `@${truncateLine(filePath, Math.max(1, popupWidth - prefix.length - 1))}`
-                const rowText = `${prefix}${label}`
+                const label =
+                  entry.kind === 'bot'
+                    ? `@${entry.insertion} · ${formatBotAvatarBadge(resolveBotAvatar(entry.bot))} ${entry.bot.name}`
+                    : `@${entry.path}`
+                const shown = truncateLine(label, Math.max(1, popupWidth - prefix.length))
+                const rowText = `${prefix}${shown}`
                 const pad = selected ? ' '.repeat(Math.max(0, popupWidth - rowText.length)) : ''
                 return (
-                  <Box key={filePath} width={popupWidth}>
+                  <Box key={entry.kind === 'bot' ? `bot:${entry.bot.id}` : `file:${entry.path}`} width={popupWidth}>
                     <Text inverse={selected} bold={selected} wrap="truncate">
                       {rowText}
                       {pad}
