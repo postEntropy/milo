@@ -999,6 +999,7 @@ struct ChatView: View {
                                 minHeight: welcomeHeight,
                                 alignment: composing ? .bottom : .center
                             )
+                            .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.14), value: composing)
                             .transition(.opacity)
                             .id(Self.threadTop)
                         }
@@ -1601,11 +1602,11 @@ struct WelcomeView: View {
     @State private var pressCount = 0
 
     /// Drops the greeting when the keyboard + accessory bar leave too little vertical
-    /// room so the four cards never slip behind the composer.
+    /// room so the strip never slips behind the composer.
     private var showHero: Bool {
         guard !typing else { return false }
         if model.sessionBot != nil { return true }
-        if keyboardUp, availableHeight > 0, availableHeight < 290 { return false }
+        if keyboardUp, availableHeight > 0, availableHeight < 120 { return false }
         return true
     }
 
@@ -1613,6 +1614,9 @@ struct WelcomeView: View {
         let contentTransition: AnyTransition = reduceMotion
             ? .opacity
             : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
+        let stripTransition: AnyTransition = reduceMotion
+            ? .opacity
+            : .opacity.combined(with: .offset(y: 10))
 
         return VStack(spacing: 0) {
             Spacer(minLength: keyboardUp && model.sessionBot == nil ? 0 : MiloTheme.Space.three)
@@ -1624,22 +1628,28 @@ struct WelcomeView: View {
 
                     if model.sessionBot == nil {
                         Spacer()
-                            .frame(height: keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.five)
+                            .frame(height: keyboardUp ? MiloTheme.Space.four : MiloTheme.Space.five)
                     }
                 }
 
                 if model.sessionBot == nil {
-                    VStack(spacing: keyboardUp ? MiloTheme.Space.one + 2 : MiloTheme.Space.three) {
-                        ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                            let isResume: Bool = {
-                                if case .resume = suggestion.act { return true }
-                                return false
-                            }()
-                            let hasMore = index < model.suggestions.count - 1
-                            card(suggestion, isResume: isResume)
-                                .padding(.bottom, isResume && hasMore ? (keyboardUp ? MiloTheme.Space.one : MiloTheme.Space.two) : 0)
+                    Group {
+                        if keyboardUp {
+                            keyboardStrip
+                                .transition(stripTransition)
+                        } else {
+                            VStack(spacing: MiloTheme.Space.two + 2) {
+                                ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                                    let isResume = isResumeSuggestion(suggestion)
+                                    let hasMore = index < model.suggestions.count - 1
+                                    card(suggestion, isResume: isResume)
+                                        .padding(.bottom, isResume && hasMore ? MiloTheme.Space.one : 0)
+                                }
+                            }
+                            .transition(contentTransition)
                         }
                     }
+                    .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.14), value: keyboardUp)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.ideas)
                     .transition(contentTransition)
                 }
@@ -1723,11 +1733,59 @@ struct WelcomeView: View {
                             .font(MiloTheme.Text.base)
                             .foregroundStyle(MiloTheme.mutedStrong)
                             .multilineTextAlignment(.center)
+                            .transition(.opacity)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
         }
+    }
+
+    private func isResumeSuggestion(_ suggestion: Suggestion) -> Bool {
+        if case .resume = suggestion.act { return true }
+        return false
+    }
+
+    private var keyboardStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: MiloTheme.Space.two) {
+                ForEach(model.suggestions) { suggestion in
+                    pill(suggestion, isResume: isResumeSuggestion(suggestion))
+                }
+            }
+        }
+        .contentMargins(.horizontal, MiloTheme.margin, for: .scrollContent)
+        .padding(.horizontal, -MiloTheme.margin)
+        .fixedSize(horizontal: false, vertical: true)
+        .scrollClipDisabled()
+        .marksSidewaysDrag()
+    }
+
+    private func pill(_ suggestion: Suggestion, isResume: Bool) -> some View {
+        Button {
+            press(suggestion)
+        } label: {
+            HStack(spacing: MiloTheme.Space.two) {
+                Image(systemName: suggestion.symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
+
+                Text(suggestion.title)
+                    .font(MiloTheme.Text.small.weight(.medium))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 210, alignment: .leading)
+            }
+            .padding(.horizontal, MiloTheme.Space.three)
+            .frame(height: 36)
+            .glassEffect(
+                (isResume ? Glass.regular.tint(MiloTheme.accent.opacity(0.12)) : .regular).interactive(),
+                in: Capsule()
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
     }
 
     private func card(_ suggestion: Suggestion, isResume: Bool) -> some View {
@@ -1736,9 +1794,9 @@ struct WelcomeView: View {
         } label: {
             HStack(alignment: .center, spacing: MiloTheme.Space.three) {
                 Image(systemName: suggestion.symbol)
-                    .font(.system(size: keyboardUp ? 13 : 15, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
-                    .frame(width: keyboardUp ? 26 : 34, height: keyboardUp ? 26 : 34)
+                    .frame(width: isResume ? 34 : 30, height: isResume ? 34 : 30)
                     .background(
                         isResume ? MiloTheme.accent.opacity(0.16) : MiloTheme.surfaceWarm,
                         in: Circle()
@@ -1748,17 +1806,19 @@ struct WelcomeView: View {
                     Text(suggestion.title)
                         .font(MiloTheme.Text.base.weight(.semibold))
                         .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(keyboardUp ? 1 : 2)
+                        .lineLimit(isResume ? 2 : 1)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.tail)
 
-                    Text(suggestion.detail)
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.mutedStrong)
-                        .lineLimit(keyboardUp ? 1 : 2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if isResume {
+                        Text(suggestion.detail)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 if isResume {
@@ -1769,7 +1829,7 @@ struct WelcomeView: View {
                 }
             }
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three)
+            .padding(.vertical, isResume ? MiloTheme.Space.three : MiloTheme.Space.two + 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .miloGlassCard(tint: isResume ? MiloTheme.accent.opacity(0.12) : nil, interactive: true)
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
