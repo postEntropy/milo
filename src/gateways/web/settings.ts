@@ -170,11 +170,15 @@ export class WebSettings {
         if (/[\r\n]/.test(body.name)) throw new Error('A bot name must fit on one line.')
         if (body.handle !== undefined && typeof body.handle !== 'string') throw new Error('Invalid bot handle.')
         if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new Error('Invalid bot instructions.')
+        if (body.avatar !== undefined && (typeof body.avatar !== 'object' || body.avatar === null || Array.isArray(body.avatar))) {
+          throw new Error('Invalid bot avatar.')
+        }
         if (!this.runtime.crew) throw new Error('Crew is not available.')
         const bot = await this.runtime.crew.create({
           name: body.name,
           handle: typeof body.handle === 'string' ? body.handle : undefined,
           instructions: typeof body.instructions === 'string' ? body.instructions : undefined,
+          ...(body.avatar ? { avatar: body.avatar as Record<string, unknown> } : {}),
         })
         this.files?.crewChanged?.()
         return bot

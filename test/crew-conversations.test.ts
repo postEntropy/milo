@@ -484,7 +484,9 @@ describe('Crew conversations, mentions, and profiles', () => {
       name: 'Capitalista',
       handle: 'capitalista',
       instructions: 'Market perspective.',
-    })) as { id: string }
+      avatar: { shape: 'gem', eyes: 'visor', accessory: 'crown', palette: 'lime' },
+    })) as { id: string; avatar?: { shape: string; eyes: string; accessory: string; palette: string } }
+    expect(cap.avatar).toEqual({ shape: 'gem', eyes: 'visor', accessory: 'crown', palette: 'lime' })
     expect(crewChanged).toHaveBeenCalledTimes(1)
 
     await webSettings.handle('crew-update', { id: cap.id, name: 'Capitalista Pro' })

@@ -4,6 +4,23 @@ export const CREW_AVATAR_SHAPES = ['orb', 'pebble', 'capsule', 'droplet', 'puff'
 export const CREW_AVATAR_EYES = ['capsule', 'happy', 'curious', 'visor', 'wink', 'spark'] as const
 export const CREW_AVATAR_ACCESSORIES = ['none', 'antenna', 'sprout', 'glasses', 'headphones', 'crown'] as const
 
+/** Normalizes an explicit mention handle (stripping leading `@` and lowercasing). */
+export function normalizeBotHandle(raw: string): string {
+  return raw.trim().replace(/^@+/, '').toLowerCase()
+}
+
+/** Derives a clean ASCII slug from a display name when no explicit handle was given. */
+export function slugifyBotHandle(name: string): string {
+  const ascii = name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 36)
+  return ascii && /^[a-z0-9]/.test(ascii) ? ascii : 'bot'
+}
+
 export type CrewAvatarShape = (typeof CREW_AVATAR_SHAPES)[number]
 export type CrewAvatarEyes = (typeof CREW_AVATAR_EYES)[number]
 export type CrewAvatarAccessory = (typeof CREW_AVATAR_ACCESSORIES)[number]
@@ -36,6 +53,25 @@ export function defaultBotAvatar(id: string, name = ''): CrewAvatar {
     accessory: CREW_AVATAR_ACCESSORIES[h3 % CREW_AVATAR_ACCESSORIES.length]!,
     palette: COLOR_PALETTE_IDS[h4 % COLOR_PALETTE_IDS.length]!,
   }
+}
+
+/** Picks a new avatar trait combination, avoiding repeating the current silhouette/eyes/palette. */
+export function shuffleBotAvatar(
+  current?: CrewAvatar,
+  pick: (length: number) => number = (length) => Math.floor(Math.random() * length),
+): CrewAvatar {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const next: CrewAvatar = {
+      shape: CREW_AVATAR_SHAPES[pick(CREW_AVATAR_SHAPES.length)]!,
+      eyes: CREW_AVATAR_EYES[pick(CREW_AVATAR_EYES.length)]!,
+      accessory: CREW_AVATAR_ACCESSORIES[pick(CREW_AVATAR_ACCESSORIES.length)]!,
+      palette: COLOR_PALETTE_IDS[pick(COLOR_PALETTE_IDS.length)] as ColorPaletteId,
+    }
+    if (!current || next.shape !== current.shape || next.eyes !== current.eyes || next.palette !== current.palette) {
+      return next
+    }
+  }
+  return defaultBotAvatar(`${Date.now()}:${pick(1_000_000)}`)
 }
 
 const EYE_GLYPHS: Record<CrewAvatarEyes, string> = {

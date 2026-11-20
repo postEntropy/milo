@@ -7,13 +7,16 @@ import { ensurePrivateDir, writePrivateFile } from '../util/fs.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
 import { processIdentity, processIsGone } from '../util/process-identity.js'
-import { COLOR_PALETTE_IDS, type ColorPaletteId } from './color-palettes.js'
+import { COLOR_PALETTE_IDS } from './color-palettes.js'
 import {
   CREW_AVATAR_ACCESSORIES,
   CREW_AVATAR_EYES,
   CREW_AVATAR_SHAPES,
   defaultBotAvatar,
   formatBotAvatarBadge,
+  normalizeBotHandle,
+  shuffleBotAvatar,
+  slugifyBotHandle,
   type CrewAvatar,
   type CrewAvatarAccessory,
   type CrewAvatarEyes,
@@ -28,6 +31,8 @@ export {
   CREW_AVATAR_SHAPES,
   defaultBotAvatar,
   formatBotAvatarBadge,
+  normalizeBotHandle,
+  slugifyBotHandle,
   type CrewAvatar,
   type CrewAvatarAccessory,
   type CrewAvatarEyes,
@@ -62,23 +67,6 @@ const MAX_PRIOR_CHARS = 8_000
 
 function cleanBotName(name: string): string {
   return name.replace(/[\r\n]+/g, ' ').replace(/\)/g, ' ').trim()
-}
-
-/** Normalizes an explicit mention handle (stripping leading `@` and lowercasing). */
-export function normalizeBotHandle(raw: string): string {
-  return raw.trim().replace(/^@+/, '').toLowerCase()
-}
-
-/** Derives a clean ASCII slug from a display name when no explicit handle was given. */
-export function slugifyBotHandle(name: string): string {
-  const ascii = name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, 36)
-  return ascii && /^[a-z0-9]/.test(ascii) ? ascii : 'bot'
 }
 
 function nextUniqueHandle(seed: string, taken: Set<string>): string {
@@ -171,18 +159,7 @@ export function formatPriorReports(reports: ReadonlyArray<string | undefined>, h
 }
 
 function randomBotAvatar(current?: CrewAvatar): CrewAvatar {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const next: CrewAvatar = {
-      shape: CREW_AVATAR_SHAPES[randomInt(CREW_AVATAR_SHAPES.length)]!,
-      eyes: CREW_AVATAR_EYES[randomInt(CREW_AVATAR_EYES.length)]!,
-      accessory: CREW_AVATAR_ACCESSORIES[randomInt(CREW_AVATAR_ACCESSORIES.length)]!,
-      palette: COLOR_PALETTE_IDS[randomInt(COLOR_PALETTE_IDS.length)] as ColorPaletteId,
-    }
-    if (!current || next.shape !== current.shape || next.eyes !== current.eyes || next.palette !== current.palette) {
-      return next
-    }
-  }
-  return defaultBotAvatar(randomUUID())
+  return shuffleBotAvatar(current, (length) => randomInt(length))
 }
 
 const assignmentSchema = z.object({
