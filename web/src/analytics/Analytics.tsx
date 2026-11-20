@@ -251,8 +251,15 @@ export function Analytics({
       {summary && summary.requestsWithUsage < summary.requests && <p className="analytics-usage-note">Token counts are available for {number(summary.requestsWithUsage)} of {number(summary.requests)} requests.</p>}
       {summary && summary.models.length > 0 && <section className="analytics-models" aria-label="Models">
         <h3>Models</h3>
-        <div>{summary.models.map((model) => <button type="button" className="analytics-model" key={model.model} onClick={() => update(() => setQuery(model.model))}>
-          <strong>{model.model}</strong><span>{number(model.requests)} requests · {number(model.inputTokens)} input · {number(model.outputTokens)} output{model.failures ? ` · ${number(model.failures)} failed` : ''}</span>
+        <div className="analytics-model-grid">{summary.models.map((model) => <button type="button" className="analytics-model" key={model.model} onClick={() => update(() => setQuery(model.model))}>
+          <div className="analytics-model-head">
+            <strong className="analytics-model-title" title={model.model}>{model.model}</strong>
+            <span className="analytics-model-requests">{number(model.requests)} req</span>
+          </div>
+          <span className="analytics-model-meta">
+            {number(model.inputTokens)} in · {number(model.outputTokens)} out
+            {model.failures ? <> · <em className="analytics-model-fail">{number(model.failures)} failed</em></> : null}
+          </span>
         </button>)}</div>
       </section>}
       <div className="analytics-filters">
