@@ -35,6 +35,21 @@ struct CrewAvatarModel: Decodable, Hashable, Sendable {
         )
     }
 
+    static func shuffled(from current: CrewAvatarModel? = nil) -> CrewAvatarModel {
+        for _ in 0..<8 {
+            let next = CrewAvatarModel(
+                shape: shapes.randomElement() ?? "orb",
+                eyes: eyesList.randomElement() ?? "capsule",
+                accessory: accessories.randomElement() ?? "none",
+                palette: palettes.randomElement() ?? "peach"
+            )
+            if current == nil || next.shape != current?.shape || next.eyes != current?.eyes || next.palette != current?.palette {
+                return next
+            }
+        }
+        return fromSeed(id: UUID().uuidString)
+    }
+
     func with(shape: String? = nil, eyes: String? = nil, accessory: String? = nil, palette: String? = nil) -> CrewAvatarModel {
         CrewAvatarModel(
             shape: shape ?? self.shape,
@@ -464,6 +479,7 @@ struct CrewView: View, Equatable {
     @State private var newBotName = ""
     @State private var newBotHandle = ""
     @State private var newBotInstructions = ""
+    @State private var newBotAvatar = CrewAvatarModel.shuffled()
     @State private var editingProfileBot: CrewBot?
     @State private var profileNameDraft = ""
     @State private var profileHandleDraft = ""
@@ -497,9 +513,11 @@ struct CrewView: View, Equatable {
                 onDismissError: { error = nil; refreshError = nil },
                 onSessions: onSessions,
                 onNewBot: {
+                    error = nil
                     newBotName = ""
                     newBotHandle = ""
                     newBotInstructions = ""
+                    newBotAvatar = .shuffled()
                     creatingBot = true
                 },
                 onRefresh: { await refresh() },
@@ -589,68 +607,46 @@ struct CrewView: View, Equatable {
         }
         .sheet(item: $openRun) { run in RunDetail(run: run, name: runName) }
         .sheet(isPresented: $creatingBot) {
-            NavigationStack {
-                Form {
-                    Section("Identity") {
-                        TextField("Display name", text: $newBotName)
-                        TextField("Mention handle (optional)", text: $newBotHandle)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    Section("Permanent instructions") {
-                        TextEditor(text: $newBotInstructions)
-                            .frame(minHeight: 120)
-                    }
-                }
-                .navigationTitle("New bot")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { creatingBot = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Create") {
-                            Task {
-                                if let created = await createBot() {
-                                    creatingBot = false
-                                    path.append(.bot(created.id))
-                                }
-                            }
-                        }
-                        .disabled(busy || newBotName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            BotFormSheet(
+                title: "New bot",
+                subtitle: "Give your teammate a name, @handle, and permanent instructions.",
+                submitLabel: busy ? "Creating…" : "Create bot",
+                submitSymbol: "plus",
+                avatar: newBotAvatar,
+                onShuffle: { newBotAvatar = .shuffled(from: newBotAvatar) },
+                showStarters: true,
+                name: $newBotName,
+                handle: $newBotHandle,
+                instructions: $newBotInstructions,
+                busy: busy,
+                error: error
+            ) {
+                Task {
+                    if let created = await createBot() {
+                        creatingBot = false
+                        path.append(.bot(created.id))
                     }
                 }
             }
         }
         .sheet(item: $editingProfileBot) { bot in
-            NavigationStack {
-                Form {
-                    Section("Identity") {
-                        TextField("Display name", text: $profileNameDraft)
-                        TextField("Mention handle", text: $profileHandleDraft)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    Section("Permanent instructions") {
-                        TextEditor(text: $profileInstructionsDraft)
-                            .frame(minHeight: 140)
-                    }
-                }
-                .navigationTitle("Bot profile")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { editingProfileBot = nil }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            Task {
-                                if await saveProfile(bot.id) {
-                                    editingProfileBot = nil
-                                }
-                            }
-                        }
-                        .disabled(busy || profileNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            BotFormSheet(
+                title: "Bot profile",
+                subtitle: "Update name, mention handle, and permanent instructions.",
+                submitLabel: busy ? "Saving…" : "Save changes",
+                submitSymbol: nil,
+                avatar: bot.resolvedAvatar,
+                onShuffle: nil,
+                showStarters: false,
+                name: $profileNameDraft,
+                handle: $profileHandleDraft,
+                instructions: $profileInstructionsDraft,
+                busy: busy,
+                error: error
+            ) {
+                Task {
+                    if await saveProfile(bot.id) {
+                        editingProfileBot = nil
                     }
                 }
             }
@@ -720,14 +716,13 @@ struct CrewView: View, Equatable {
             .padding(MiloTheme.Space.four)
             .frame(maxWidth: .infinity, alignment: .leading)
             .miloGlassCard(radius: MiloTheme.Radius.xl, interactive: true)
+            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
         }
         .buttonStyle(PressableStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
         .contextMenu {
             menuItem("Customize appearance", "slider.horizontal.3") {
                 customizingBot = IdentifiableBotId(id: bot.id)
-            }
-            menuItem("Shuffle avatar", "sparkles", disabled: busy) {
-                Task { await updateAvatar(bot.id, field: "shuffle") }
             }
             menuItem("Rename", "pencil") {
                 renameDraft = bot.name
@@ -784,6 +779,7 @@ struct CrewView: View, Equatable {
                 tint: item.state == "running" ? MiloTheme.accent.opacity(0.14) : nil,
                 interactive: true
             )
+            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
         }
         .buttonStyle(PressableStyle())
     }
@@ -857,6 +853,7 @@ struct CrewView: View, Equatable {
 
                     HStack(spacing: MiloTheme.Space.two) {
                         profileActionPill("Profile", symbol: "doc.text") {
+                            error = nil
                             profileNameDraft = bot.name
                             profileHandleDraft = bot.handle ?? ""
                             profileInstructionsDraft = bot.instructions ?? ""
@@ -864,9 +861,6 @@ struct CrewView: View, Equatable {
                         }
                         profileActionPill("Customize", symbol: "slider.horizontal.3") {
                             customizingBot = IdentifiableBotId(id: bot.id)
-                        }
-                        profileActionPill("Shuffle", symbol: "sparkles", disabled: busy) {
-                            Task { await updateAvatar(bot.id, field: "shuffle") }
                         }
                     }
                     .padding(.top, MiloTheme.Space.one)
@@ -957,8 +951,10 @@ struct CrewView: View, Equatable {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .miloGlassCard(radius: MiloTheme.Radius.xl)
                     } else {
-                        ForEach(bot.assignments.reversed()) { assignment in
-                            assignmentCard(assignment)
+                        LazyVStack(alignment: .leading, spacing: MiloTheme.Space.four) {
+                            ForEach(bot.assignments.reversed()) { assignment in
+                                assignmentCard(assignment)
+                            }
                         }
                     }
                 }
@@ -978,9 +974,6 @@ struct CrewView: View, Equatable {
                 Menu {
                     menuItem("Customize appearance", "slider.horizontal.3") {
                         customizingBot = IdentifiableBotId(id: bot.id)
-                    }
-                    menuItem("Shuffle avatar", "sparkles", disabled: busy) {
-                        Task { await updateAvatar(bot.id, field: "shuffle") }
                     }
                     menuItem("Rename", "pencil") {
                         renameDraft = bot.name
@@ -1552,6 +1545,12 @@ struct CrewView: View, Equatable {
             if !handle.isEmpty { body["handle"] = handle }
             let instructions = newBotInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
             if !instructions.isEmpty { body["instructions"] = instructions }
+            body["avatar"] = [
+                "shape": newBotAvatar.shape,
+                "eyes": newBotAvatar.eyes,
+                "accessory": newBotAvatar.accessory,
+                "palette": newBotAvatar.palette,
+            ]
             let created = try await MiloApi.call("crew-create", body, account: account, as: CrewBot.self)
             refreshGeneration += 1
             bots.insert(created, at: 0)
@@ -1702,7 +1701,7 @@ private struct BotAppearanceSheet: View {
                     }
                     Spacer(minLength: MiloTheme.Space.two)
                     MiloIconButton(
-                        systemName: "sparkles",
+                        systemName: "shuffle",
                         size: 15,
                         span: 44,
                         glass: true,
@@ -1864,6 +1863,268 @@ private struct BotAppearanceSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Bot Form Sheet
+
+private struct BotRoleStarter: Identifiable {
+    let name: String
+    let icon: String
+    let summary: String
+    let instructions: String
+
+    var id: String { name }
+
+    static let all: [BotRoleStarter] = [
+        BotRoleStarter(
+            name: "Researcher",
+            icon: "magnifyingglass",
+            summary: "Verify sources, compare options, and report concisely.",
+            instructions: "Verify facts against primary sources or files before concluding. Compare trade-offs clearly and keep reports concise with concrete findings."
+        ),
+        BotRoleStarter(
+            name: "Code reviewer",
+            icon: "checkmark.shield",
+            summary: "Inspect changes for edge cases and missing tests.",
+            instructions: "Review diffs for correctness, edge cases, regressions, and missing tests. Report concrete issues first with exact file references."
+        ),
+        BotRoleStarter(
+            name: "Planner",
+            icon: "list.bullet.clipboard",
+            summary: "Break goals into steps, risks, and next actions.",
+            instructions: "Turn open-ended goals into ordered, actionable steps. Surface dependencies, open questions, and risks before execution."
+        ),
+    ]
+}
+
+private struct BotFormSheet: View {
+    let title: String
+    let subtitle: String
+    let submitLabel: String
+    let submitSymbol: String?
+    let avatar: CrewAvatarModel
+    let onShuffle: (() -> Void)?
+    let showStarters: Bool
+    @Binding var name: String
+    @Binding var handle: String
+    @Binding var instructions: String
+    let busy: Bool
+    let error: String?
+    let onSubmit: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    private enum Field: Hashable { case name, handle, instructions }
+    @FocusState private var focused: Field?
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var previewHandle: String {
+        let cleaned = handle
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "^@+", with: "", options: .regularExpression)
+            .lowercased()
+        if !cleaned.isEmpty { return "@\(cleaned)" }
+        let slug = trimmedName
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9_-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+        return slug.isEmpty ? "@bot" : "@\(slug)"
+    }
+
+    private var canSubmit: Bool {
+        !busy && !trimmedName.isEmpty
+    }
+
+    var body: some View {
+        let haloTone = Color.hex(MiloPaletteId.resolve(avatar.palette).preset.logoTop)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        Text(title)
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                        Text(subtitle)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: MiloTheme.Space.two)
+                    MiloIconButton(
+                        systemName: "xmark",
+                        size: 15,
+                        span: 36,
+                        glass: true,
+                        action: { dismiss() }
+                    )
+                    .accessibilityLabel("Close")
+                }
+
+                if let error {
+                    MiloErrorPill(text: error)
+                }
+
+                // Live avatar & identity card
+                VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
+                    HStack(spacing: MiloTheme.Space.three) {
+                        ZStack {
+                            Circle()
+                                .fill(haloTone.opacity(0.16))
+                                .frame(width: 64, height: 64)
+                            CrewBotAvatar(avatar: avatar, size: 52, animated: true)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(trimmedName.isEmpty ? "New teammate" : trimmedName)
+                                .font(MiloTheme.Text.body.weight(.semibold))
+                                .foregroundStyle(trimmedName.isEmpty ? MiloTheme.muted : MiloTheme.foreground)
+                                .lineLimit(1)
+                            Text(previewHandle)
+                                .font(MiloTheme.Text.small.monospaced())
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(1)
+                        }
+
+                        if let onShuffle {
+                            Spacer(minLength: MiloTheme.Space.two)
+                            MiloIconButton(
+                                systemName: "shuffle",
+                                size: 15,
+                                span: 40,
+                                glass: true,
+                                disabled: busy,
+                                action: onShuffle
+                            )
+                            .accessibilityLabel("Shuffle avatar")
+                        }
+                    }
+                    .sensoryFeedback(.selection, trigger: avatar)
+
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        Text("Display name")
+                            .font(MiloTheme.Text.meta.weight(.semibold))
+                            .foregroundStyle(MiloTheme.muted)
+
+                        TextField("e.g. Scout", text: $name)
+                            .focused($focused, equals: .name)
+                            .font(MiloTheme.Text.body)
+                            .foregroundStyle(MiloTheme.foreground)
+                            .padding(.horizontal, MiloTheme.Space.four)
+                            .padding(.vertical, MiloTheme.Space.three)
+                            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    }
+
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        Text("Mention handle")
+                            .font(MiloTheme.Text.meta.weight(.semibold))
+                            .foregroundStyle(MiloTheme.muted)
+
+                        HStack(spacing: MiloTheme.Space.one) {
+                            Text("@")
+                                .font(MiloTheme.Text.body.monospaced())
+                                .foregroundStyle(MiloTheme.muted)
+                            TextField("optional", text: $handle)
+                                .focused($focused, equals: .handle)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(MiloTheme.Text.body.monospaced())
+                                .foregroundStyle(MiloTheme.foreground)
+                        }
+                        .padding(.horizontal, MiloTheme.Space.four)
+                        .padding(.vertical, MiloTheme.Space.three)
+                        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    }
+                }
+                .padding(MiloTheme.Space.four)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .miloGlassCard(radius: MiloTheme.Radius.xl)
+
+                // Permanent instructions
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    Text("Permanent instructions")
+                        .font(MiloTheme.Text.base.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+
+                    TextField(
+                        "Role, perspective, tone, or rules to follow in every session…",
+                        text: $instructions,
+                        axis: .vertical
+                    )
+                    .lineLimit(4...9)
+                    .focused($focused, equals: .instructions)
+                    .font(MiloTheme.Text.body)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .padding(MiloTheme.Space.four)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+                    .miloGlassCard(radius: MiloTheme.Radius.xl)
+                    .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                    .onTapGesture { focused = .instructions }
+
+                    if showStarters && instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(spacing: MiloTheme.Space.two) {
+                            ForEach(BotRoleStarter.all) { starter in
+                                Button {
+                                    if trimmedName.isEmpty { name = starter.name }
+                                    instructions = starter.instructions
+                                    focused = .instructions
+                                } label: {
+                                    HStack(spacing: MiloTheme.Space.three) {
+                                        Image(systemName: starter.icon)
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundStyle(MiloTheme.accent)
+                                            .frame(width: 24, alignment: .center)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(starter.name)
+                                                .font(MiloTheme.Text.base.weight(.medium))
+                                                .foregroundStyle(MiloTheme.foreground)
+                                            Text(starter.summary)
+                                                .font(MiloTheme.Text.meta)
+                                                .foregroundStyle(MiloTheme.muted)
+                                        }
+                                        Spacer(minLength: MiloTheme.Space.two)
+                                    }
+                                    .padding(.horizontal, MiloTheme.Space.four)
+                                    .padding(.vertical, MiloTheme.Space.three)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .miloGlassCard(radius: MiloTheme.Radius.xl, interactive: true)
+                                    .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                                }
+                                .buttonStyle(PressableStyle())
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.top, MiloTheme.Space.six)
+            .padding(.bottom, MiloTheme.Space.six)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .miloWallpaperBackground()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MiloWideButton(
+                title: submitLabel,
+                systemImage: submitSymbol,
+                primary: true,
+                busy: busy,
+                action: onSubmit
+            )
+            .disabled(!canSubmit)
+            .opacity(canSubmit ? 1 : 0.45)
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.top, MiloTheme.Space.two)
+            .padding(.bottom, MiloTheme.Space.two)
+        }
+        .presentationDetents([.fraction(0.9), .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(MiloTheme.background)
     }
 }
 
