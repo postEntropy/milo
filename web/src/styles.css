@@ -2218,6 +2218,7 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 .workspace-rail-link:hover, .workspace-rail-link.active { background: var(--accent-wash); color: var(--fg); }
 .workspace-detail { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; }
 .workspace-detail > .settings-inner { width: auto; min-width: 0; flex: 1; margin: 0; padding: 30px var(--space-10) var(--space-9); }
+.routine-drawer .settings-inner { width: auto; padding: var(--space-8) var(--space-8) var(--space-9); }
 
 .workspace-rail .routine-row { grid-template-columns: 10px minmax(0, 1fr) auto; gap: var(--space-6); min-height: 60px; padding: var(--space-6) var(--space-7); }
 .workspace-rail .routine-row-open { grid-template-columns: minmax(0, 1fr); }

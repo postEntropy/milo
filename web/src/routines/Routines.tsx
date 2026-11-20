@@ -685,7 +685,7 @@ function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId
   return <div className="routine-drawer-layer" role="dialog" aria-modal="true" aria-label="New routine">
   <button className="routine-drawer-scrim" type="button" aria-label="Close new routine" onClick={onBack} />
   <div className="routine-drawer">
-  <Panel inSplit={inSplit} head={<PageHeader
+  <Panel head={<PageHeader
     back={<button className="settings-back" type="button" onClick={onBack}><Icon name="x" /><span>Close</span></button>}
     title="New routine"
     description="Describe the task and schedule. Milo will turn your request into a routine."
