@@ -1,39 +1,11 @@
 import SwiftUI
 import UIKit
 
-private struct StatusBarBlur: UIViewRepresentable {
-    @Environment(\.colorScheme) private var colorScheme
-
-    final class BlurView: UIVisualEffectView {
-        private var animator: UIViewPropertyAnimator?
-        private var style: UIBlurEffect.Style?
-
-        func setStyle(_ next: UIBlurEffect.Style) {
-            guard style != next else { return }
-            animator?.stopAnimation(true)
-            effect = nil
-            style = next
-            let animation = UIViewPropertyAnimator(duration: 1, curve: .linear) {
-                self.effect = UIBlurEffect(style: next)
-            }
-            animation.fractionComplete = 0.1
-            animator = animation
-        }
-
-        override func willMove(toWindow newWindow: UIWindow?) {
-            super.willMove(toWindow: newWindow)
-            if newWindow == nil {
-                animator?.stopAnimation(true)
-                animator = nil
-            }
-        }
-    }
-
-    func makeUIView(context: Context) -> BlurView { BlurView() }
-
-    func updateUIView(_ view: BlurView, context: Context) {
-        let style: UIBlurEffect.Style = colorScheme == .dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight
-        view.setStyle(style)
+private struct StatusBarBlur: View {
+    var body: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .opacity(0.6)
     }
 }
 
@@ -316,7 +288,7 @@ struct ChatView: View {
                             StatusBarBlur()
                                 .mask {
                                     LinearGradient(
-                                        stops: [.init(color: .black, location: 0.55), .init(color: .clear, location: 1)],
+                                        stops: [.init(color: .black, location: 0.45), .init(color: .clear, location: 1)],
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
