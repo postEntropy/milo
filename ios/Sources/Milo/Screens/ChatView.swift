@@ -1254,7 +1254,7 @@ struct ChatView: View {
     /// The end of the thread, as an id the scroll view answers to.
     private static let threadEnd = "thread-end"
     /// The thread's own space, for measuring where a message sits in it.
-    private static let threadSpace = "thread-space"
+    nonisolated private static let threadSpace = "thread-space"
     /// The empty state's own id, so a session that opens can put the scroll back on it.
     private static let threadTop = "thread-top"
     /// The way back to the end: the box the thumb finds, and how far it floats above the
@@ -1298,7 +1298,7 @@ struct ChatView: View {
     /// Sizes the room beneath the thread so the message a send just put in can sit at the
     /// top, and scrolls that message there once the scroll view has laid the room out.
     private func sizeRoom(_ proxy: ScrollViewProxy) {
-        guard let sent else {
+        guard sent != nil else {
             if room != 1 { room = 1 }
             return
         }
