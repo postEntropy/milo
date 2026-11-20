@@ -232,7 +232,7 @@ struct SessionsDrawer: View, Equatable {
             HStack(spacing: MiloTheme.Space.two) {
                 Group {
                     if symbol == "crew" {
-                        CrewDrawerMark()
+                        CrewDrawerMark(size: 23)
                     } else {
                         Image(systemName: symbol)
                             .font(MiloTheme.Text.body)

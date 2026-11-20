@@ -2,9 +2,11 @@ import SwiftUI
 
 /// The mark shared by the Crew drawer tab and bot-management tool lines.
 struct CrewDrawerMark: View {
+    var size: CGFloat = 18
+
     var body: some View {
-        Canvas { context, size in
-            let s = min(size.width, size.height) / 24.0
+        Canvas { context, canvasSize in
+            let s = min(canvasSize.width, canvasSize.height) / 24.0
             func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
             func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x * s, y: y * s, width: w * s, height: h * s) }
 
@@ -24,7 +26,7 @@ struct CrewDrawerMark: View {
             context.fill(Path(roundedRect: rect(8.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
             context.fill(Path(roundedRect: rect(13.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
         }
-        .frame(width: 18, height: 18)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
