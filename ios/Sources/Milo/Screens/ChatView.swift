@@ -620,6 +620,7 @@ struct ChatView: View {
             CrewView(
                 account: account,
                 pushed: $crewPage,
+                claimed: held == true || drawer,
                 onSessions: openDrawer,
                 onChatWithBot: { botId in
                     crew = false

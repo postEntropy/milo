@@ -441,10 +441,11 @@ private struct IdentifiableBotId: Identifiable {
 struct CrewView: View, Equatable {
     let account: Account
     @Binding var pushed: Bool
+    var claimed: Bool = false
     let onSessions: () -> Void
     var onChatWithBot: (String) -> Void = { _ in }
     nonisolated static func == (lhs: CrewView, rhs: CrewView) -> Bool {
-        lhs.account == rhs.account
+        lhs.account == rhs.account && lhs.claimed == rhs.claimed
     }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppModel.self) private var model
@@ -504,6 +505,7 @@ struct CrewView: View, Equatable {
                 onRefresh: { await refresh() },
                 botCard: { bot in
                     botCard(bot) {
+                        guard !claimed else { return }
                         guidanceDraft = ""
                         expandedMissions = []
                         path.append(.bot(bot.id))
@@ -511,6 +513,7 @@ struct CrewView: View, Equatable {
                 },
                 workRow: { item in
                     workRow(item) {
+                        guard !claimed else { return }
                         objectiveDraft = item.objective
                         scheduleMode = item.schedule?.kind == "at" && item.schedule?.restricted == true ? "existing" : item.schedule?.kind ?? "once"
                         if item.schedule?.kind == "every" {
