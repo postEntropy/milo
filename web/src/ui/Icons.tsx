@@ -52,6 +52,7 @@ const paths = {
   cursor: <><path d="M5.5 3.5 19 10.5l-6 1.8-1.8 6z" /></>,
   compass: <><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5z" /></>,
   repeat: <><path d="M4 11V9a4 4 0 0 1 4-4h9m0 0-3-3m3 3-3 3" /><path d="M20 13v2a4 4 0 0 1-4 4H7m0 0 3 3m-3-3 3-3" /></>,
+  shuffle: <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />,
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.6 2.4 15.4 0 18M12 3c-2.4 2.6-2.4 15.4 0 18" /></>,
   dots: <><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none" /></>,
   edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,

@@ -104,6 +104,13 @@
 .crew-history p { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-2) 0 0; }
 .crew-guidance-pill { font-size: var(--text-xs); color: var(--fg-2); background: var(--surface-warm); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); }
 .crew-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.crew-handle-input { display: flex; align-items: center; border-radius: var(--radius-md); background: var(--bg); padding-inline-start: var(--space-6); transition: box-shadow var(--motion-fast); }
+.crew-handle-input:focus-within { box-shadow: var(--focus-ring); }
+.crew-handle-prefix { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-sm); flex: none; }
+.crew-handle-input input { flex: 1; min-width: 0; padding-inline-start: var(--space-1); font-family: var(--font-mono); }
+.crew-handle-input input:focus { box-shadow: none; }
+.crew-new-instructions { display: flex; flex-direction: column; gap: var(--space-3); }
+.crew-new-instructions textarea { min-height: 112px; }
 .crew-profile-card { display: flex; flex-direction: column; gap: var(--space-4); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-6) var(--space-7); margin-bottom: var(--space-5); }
 .crew-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); }
 .crew-profile-card textarea { min-height: 96px; resize: vertical; }
@@ -111,6 +118,26 @@
 .crew-profile-card .field input:focus, .crew-profile-card .field textarea:focus { background: var(--bg); }
 .crew-handle { font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
 .crew-instructions-preview { margin: 0; font-size: var(--text-xs); color: var(--fg-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.crew-empty-card { display: flex; flex-direction: column; gap: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-7); max-width: 520px; }
+.crew-empty-card h3 { margin: 0; font-size: var(--text-md); }
+.crew-empty-card p { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+
+/* New Bot Drawer */
+.crew-new-form { display: flex; flex-direction: column; gap: var(--space-5); }
+.crew-new-preview { display: flex; align-items: center; gap: var(--space-5); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-5) var(--space-6); }
+.crew-new-preview-copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.crew-new-preview-copy strong { font-size: var(--text-base); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crew-new-preview-copy strong.is-placeholder { color: var(--muted); font-weight: 500; }
+.crew-shuffle-button { margin-inline-start: auto; flex: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.crew-new-identity { margin-bottom: 0; }
+.crew-starter-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.crew-starter-card { display: flex; align-items: center; gap: var(--space-4); width: 100%; border: 0; border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4) var(--space-5); text-align: start; cursor: pointer; transition: background var(--motion-fast); }
+.crew-starter-card:hover { background: var(--border-soft); }
+.crew-starter-icon { display: grid; width: 30px; height: 30px; place-items: center; flex: none; border-radius: 50%; background: var(--surface-warm); color: var(--accent); }
+.crew-starter-copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.crew-starter-copy strong { font-size: var(--text-sm); font-weight: 600; color: var(--fg); }
+.crew-starter-copy span { font-size: var(--text-xs); color: var(--muted); }
 
 @media (max-width: 900px) {
   .crew-page .settings-inner { padding-top: calc(var(--phone-top) + var(--control-md) + var(--space-6)); }

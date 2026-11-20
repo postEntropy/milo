@@ -15,6 +15,11 @@ import { MessageList } from '../chat/MessageList.js'
 import type { ChatMessage } from '../chat/message.js'
 import type { TranscriptMessage } from '@protocol'
 import {
+  normalizeBotHandle,
+  shuffleBotAvatar,
+  slugifyBotHandle,
+} from '../../../src/core/crew-avatars.js'
+import {
   ACCESSORY_LABELS,
   BotAvatar,
   botAvatarOf,
@@ -27,6 +32,27 @@ import {
   SHAPE_LABELS,
 } from './BotAvatar.js'
 import { colorPalettePreset } from '../theme/palettes.js'
+
+const BOT_ROLE_STARTERS = [
+  {
+    name: 'Researcher',
+    icon: 'search' as const,
+    summary: 'Verify sources, compare options, and report concisely.',
+    instructions: 'Verify facts against primary sources or files before concluding. Compare trade-offs clearly and keep reports concise with concrete findings.',
+  },
+  {
+    name: 'Code reviewer',
+    icon: 'shield' as const,
+    summary: 'Inspect changes for edge cases and missing tests.',
+    instructions: 'Review diffs for correctness, edge cases, regressions, and missing tests. Report concrete issues first with exact file references.',
+  },
+  {
+    name: 'Planner',
+    icon: 'list-check' as const,
+    summary: 'Break goals into steps, risks, and next actions.',
+    instructions: 'Turn open-ended goals into ordered, actionable steps. Surface dependencies, open questions, and risks before execution.',
+  },
+]
 
 type WorkView = DelegatedWork & { scheduleLabel: string }
 
@@ -49,6 +75,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
   const [newName, setNewName] = useState('')
   const [newHandle, setNewHandle] = useState('')
   const [newInstructions, setNewInstructions] = useState('')
+  const [newAvatar, setNewAvatar] = useState<CrewAvatar>(() => shuffleBotAvatar())
   const [name, setName] = useState('')
   const [handle, setHandle] = useState('')
   const [instructions, setInstructions] = useState('')
@@ -162,6 +189,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         name: newName,
         ...(newHandle.trim() ? { handle: newHandle } : {}),
         ...(newInstructions.trim() ? { instructions: newInstructions } : {}),
+        avatar: newAvatar,
       })
       generation.current += 1
       setBots((current) => [created, ...(current ?? [])])
@@ -264,6 +292,15 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
     finally { setSaving(false) }
   }
 
+  const openCreate = () => {
+    setError(null)
+    setNewName('')
+    setNewHandle('')
+    setNewInstructions('')
+    setNewAvatar(shuffleBotAvatar())
+    setCreating(true)
+  }
+
   const head = job
     ? <PageHeader title={job.name} description={job.scheduleLabel} back={<button className="settings-back" type="button" onClick={() => { setSelectedWork(null); setOpenRun(null) }}><Icon name="arrow-left" /><span>Crew</span></button>} />
     : bot
@@ -271,7 +308,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
       : <PageHeader title="Crew" description="The work and bots Milo is looking after." />
 
   return <div className="crew-page"><Panel head={head}>
-    {(error || refreshError) && <div className="panel-state" role="alert">{error || refreshError}{error && <button className="button" type="button" onClick={() => setError(null)}>Dismiss</button>}</div>}
+    {((!creating && error) || refreshError) && <div className="panel-state" role="alert">{(!creating && error) || refreshError}{!creating && error && <button className="button" type="button" onClick={() => setError(null)}>Dismiss</button>}</div>}
     {bots === null || work === null ? <SkeletonList rows={4} label="Loading Crew…" /> : job ? <>
       <div className="crew-work-hero">
         <div className="crew-work-hero-head">
@@ -440,21 +477,15 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         </section>
       })}
     </> : <>
-    <div className="crew-toolbar">
-      <button className="button primary" type="button" onClick={() => setCreating((current) => !current)}>{creating ? 'Cancel' : 'New bot'}</button>
-    </div>
-    {creating && <form className="crew-profile-card" onSubmit={(event) => { event.preventDefault(); void createBot() }}>
-      <div className="crew-profile-grid">
-        <Field label="Display name"><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Architect" /></Field>
-        <Field label="Mention handle (optional)"><input value={newHandle} onChange={(event) => setNewHandle(event.target.value)} placeholder="e.g. architect" /></Field>
-      </div>
-      <Field label="Permanent instructions (optional)">
-        <textarea value={newInstructions} onChange={(event) => setNewInstructions(event.target.value)} placeholder="Role, perspective, and style for conversations and missions." />
-      </Field>
+    {bots.length === 0 && work.length === 0 ? <div className="crew-empty-card">
+      <h3>No bots yet</h3>
+      <p>Create a bot with permanent instructions to chat with it or mention it with @, or ask Milo to delegate a task.</p>
       <div className="crew-actions-row">
-        <button className="button primary" type="submit" disabled={saving || !newName.trim()}>Create bot</button>
+        <button className="button primary" type="button" onClick={openCreate}><Icon name="plus" size={15} /> New bot</button>
       </div>
-    </form>}
+    </div> : <div className="crew-toolbar">
+      <button className="button primary" type="button" onClick={openCreate}><Icon name="plus" size={15} /> New bot</button>
+    </div>}
     {bots.length > 0 && <>
       <h3 className="crew-section-title">Bots</h3>
       <div className="crew-grid">{bots.map((entry) => {
@@ -502,5 +533,148 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         </button>
       })}</div>
     </>}</>}
-  </Panel></div>
+  </Panel>
+  {creating && <NewBotDrawer
+    name={newName}
+    handle={newHandle}
+    instructions={newInstructions}
+    avatar={newAvatar}
+    saving={saving}
+    error={error}
+    onNameChange={setNewName}
+    onHandleChange={setNewHandle}
+    onInstructionsChange={setNewInstructions}
+    onShuffleAvatar={() => setNewAvatar((current) => shuffleBotAvatar(current))}
+    onDismissError={() => setError(null)}
+    onClose={() => setCreating(false)}
+    onSubmit={() => void createBot()}
+  />}
+  </div>
+}
+
+function NewBotDrawer({
+  name,
+  handle,
+  instructions,
+  avatar,
+  saving,
+  error,
+  onNameChange,
+  onHandleChange,
+  onInstructionsChange,
+  onShuffleAvatar,
+  onDismissError,
+  onClose,
+  onSubmit,
+}: {
+  name: string
+  handle: string
+  instructions: string
+  avatar: CrewAvatar
+  saving: boolean
+  error: string | null
+  onNameChange: (value: string) => void
+  onHandleChange: (value: string) => void
+  onInstructionsChange: (value: string) => void
+  onShuffleAvatar: () => void
+  onDismissError: () => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const previous = document.activeElement
+    nameRef.current?.focus()
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeRef.current()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [])
+
+  const trimmedName = name.trim()
+  const normalizedHandle = normalizeBotHandle(handle)
+  const previewHandle = normalizedHandle || (trimmedName ? slugifyBotHandle(trimmedName) : 'bot')
+
+  return <div className="routine-drawer-layer" role="dialog" aria-modal="true" aria-label="New bot">
+    <button className="routine-drawer-scrim" type="button" aria-label="Close new bot" onClick={onClose} />
+    <div className="routine-drawer">
+      <Panel head={<PageHeader
+        back={<button className="settings-back" type="button" onClick={onClose}><Icon name="x" /><span>Close</span></button>}
+        title="New bot"
+        description="Give your teammate a name, @handle, and permanent instructions."
+      />}>
+        <form className="crew-new-form" onSubmit={(event) => { event.preventDefault(); onSubmit() }}>
+          {error && <div className="panel-state" role="alert">{error}<button className="button" type="button" onClick={onDismissError}>Dismiss</button></div>}
+          <div className="crew-new-preview">
+            <span className="crew-bot-stage" style={{ '--bot-tone': botToneOf(avatar) } as CSSProperties}>
+              <BotAvatar avatar={avatar} size={62} animated />
+            </span>
+            <div className="crew-new-preview-copy">
+              <strong className={trimmedName ? '' : 'is-placeholder'}>{trimmedName || 'New teammate'}</strong>
+              <span className="crew-handle">@{previewHandle}</span>
+            </div>
+            <button className="button crew-shuffle-button" type="button" onClick={onShuffleAvatar} aria-label="Shuffle avatar">
+              <Icon name="shuffle" size={15} />
+              <span>Shuffle</span>
+            </button>
+          </div>
+          <div className="crew-profile-card crew-new-identity">
+            <Field label="Display name">
+              <input ref={nameRef} value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Scout" />
+            </Field>
+            <Field label="Mention handle">
+              <div className="crew-handle-input">
+                <span className="crew-handle-prefix" aria-hidden="true">@</span>
+                <input value={handle} onChange={(event) => onHandleChange(event.target.value)} placeholder="optional" />
+              </div>
+            </Field>
+          </div>
+          <div className="crew-new-instructions">
+            <Field label="Permanent instructions">
+              <textarea
+                rows={4}
+                value={instructions}
+                onChange={(event) => onInstructionsChange(event.target.value)}
+                placeholder="Role, perspective, tone, or rules to follow in every Session…"
+              />
+            </Field>
+            {!instructions.trim() && <div className="crew-starter-list">
+              {BOT_ROLE_STARTERS.map((starter) => <button
+                key={starter.name}
+                type="button"
+                className="crew-starter-card"
+                onClick={() => {
+                  if (!trimmedName) onNameChange(starter.name)
+                  onInstructionsChange(starter.instructions)
+                }}
+              >
+                <span className="crew-starter-icon"><Icon name={starter.icon} size={15} /></span>
+                <span className="crew-starter-copy">
+                  <strong>{starter.name}</strong>
+                  <span>{starter.summary}</span>
+                </span>
+              </button>)}
+            </div>}
+          </div>
+          <div className="crew-actions-row">
+            <button className="button primary" type="submit" disabled={saving || !trimmedName}>
+              <Icon name="plus" size={15} />
+              <span>{saving ? 'Creating…' : 'Create bot'}</span>
+            </button>
+            <button className="button" type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </Panel>
+    </div>
+  </div>
 }
