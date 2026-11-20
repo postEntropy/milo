@@ -31,6 +31,7 @@ struct DetailSheet<Content: View>: View {
                 .frame(maxWidth: 620)
                 .frame(maxWidth: .infinity)
         }
+        .miloWallpaperBackground()
         // Nearly the whole screen from the first showing: what rises here is read, not
         // glanced at, and a peek of the page behind is all it needs to say where it came from
         // — the pull to the top is there for a long file or a run with plenty to say.

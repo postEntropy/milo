@@ -83,6 +83,8 @@ struct SettingsView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .miloWallpaperBackground()
             .confirmationDialog("Unpair this phone?", isPresented: $confirmUnpair, titleVisibility: .visible) {
                 Button("Unpair", role: .destructive) { model.unpair(); dismiss() }
                 Button("Cancel", role: .cancel) {}
@@ -105,6 +107,7 @@ struct SettingsView: View {
         }
         .tint(MiloTheme.accent)
         .preferredColorScheme(colorScheme)
+        .presentationBackground(MiloTheme.background)
     }
 
     /// One category: its icon, its name, and the page behind it. Nothing about what is

@@ -93,6 +93,8 @@ struct FolderPicker: View {
                     Text("These are the folders of the machine Milo runs on, not this phone's.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .miloWallpaperBackground()
             .navigationTitle("Choose a folder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -128,6 +130,7 @@ struct FolderPicker: View {
                 Text("Inside \(listing?.path ?? "this folder").")
             }
         }
+        .presentationBackground(MiloTheme.background)
     }
 
     private func create() {

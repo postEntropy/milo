@@ -263,6 +263,8 @@ private struct AttachmentSheet: View {
         }
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.hidden)
+        .miloWallpaperBackground()
+        .presentationBackground(MiloTheme.background)
         .task { await loadRecentPhotos() }
     }
 

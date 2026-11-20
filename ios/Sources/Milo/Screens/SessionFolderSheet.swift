@@ -49,6 +49,8 @@ struct SessionFolderSheet: View {
                 }
                 if saving { ProgressView("Changing folder…") }
             }
+            .scrollContentBackground(.hidden)
+            .miloWallpaperBackground()
             .disabled(saving)
             .navigationTitle("Folder")
             .navigationBarTitleDisplayMode(.inline)
@@ -58,6 +60,7 @@ struct SessionFolderSheet: View {
             }
             .task { await model.refreshProjects() }
         }
+        .presentationBackground(MiloTheme.background)
         .interactiveDismissDisabled(saving)
     }
 

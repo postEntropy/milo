@@ -81,6 +81,8 @@ struct ModelPickerSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .miloWallpaperBackground()
             // The platform's own search, over the list rather than in it: it filters the
             // catalog below and nothing else, and it is the field this surface already has —
             // in the material the platform draws it in.
@@ -108,6 +110,7 @@ struct ModelPickerSheet: View {
                 }
             }
         }
+        .presentationBackground(MiloTheme.background)
         .task {
             await model.openPicker()
             provider = model.catalogProvider
