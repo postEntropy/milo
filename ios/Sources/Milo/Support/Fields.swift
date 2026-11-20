@@ -129,3 +129,32 @@ struct MiloWideButton: View {
         .opacity(busy ? 0.6 : 1)
     }
 }
+
+/// A compact Liquid Glass action pill anchored in the bottom trailing corner of a list screen.
+struct MiloCornerActionButton: View {
+    let title: String
+    var systemImage: String = "plus"
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: action) {
+                Label(title, systemImage: systemImage)
+                    .font(MiloTheme.Text.base.weight(.semibold))
+                    .foregroundStyle(MiloTheme.accentOn)
+                    .padding(.horizontal, MiloTheme.Space.five)
+                    .frame(minHeight: 50)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(disabled)
+            .opacity(disabled ? 0.5 : 1)
+            .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+        }
+        .padding(.horizontal, MiloTheme.margin)
+        .padding(.top, MiloTheme.Space.two)
+        .padding(.bottom, MiloTheme.Space.two)
+    }
+}

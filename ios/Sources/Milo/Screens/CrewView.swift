@@ -1955,34 +1955,11 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                         Text("Create a bot with permanent instructions to chat with it or mention it with @, or ask Milo to delegate a task.")
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.muted)
-                        Button(action: onNewBot) {
-                            Label("New bot", systemImage: "plus")
-                                .font(MiloTheme.Text.small.weight(.semibold))
-                                .foregroundStyle(MiloTheme.accentOn)
-                                .padding(.horizontal, MiloTheme.Space.four)
-                                .frame(minHeight: 40)
-                                .background(MiloTheme.accent, in: Capsule())
-                        }
-                        .buttonStyle(PressableStyle())
                     }
                     .padding(MiloTheme.Space.five)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .miloGlassCard(radius: MiloTheme.Radius.xl)
                 } else {
-                    if !bots.isEmpty || !work.isEmpty {
-                        HStack {
-                            Spacer()
-                            Button(action: onNewBot) {
-                                Label("New bot", systemImage: "plus")
-                                    .font(MiloTheme.Text.small.weight(.semibold))
-                                    .foregroundStyle(MiloTheme.accentOn)
-                                    .padding(.horizontal, MiloTheme.Space.four)
-                                    .frame(minHeight: 40)
-                                    .background(MiloTheme.accent, in: Capsule())
-                            }
-                            .buttonStyle(PressableStyle())
-                        }
-                    }
                     if !bots.isEmpty {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three + 2) {
                             Text("Bots")
@@ -2031,6 +2008,9 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
             .padding(.horizontal, MiloTheme.margin)
             .padding(.bottom, MiloTheme.Space.two)
             .animation(.smooth(duration: 0.22), value: model.connectionLine)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MiloCornerActionButton(title: "New bot", action: onNewBot)
         }
         .refreshable { await onRefresh() }
     }

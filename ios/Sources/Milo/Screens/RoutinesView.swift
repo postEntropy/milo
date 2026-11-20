@@ -296,19 +296,11 @@ private struct RoutineList: View {
             .animation(.smooth(duration: 0.22), value: model.connectionLine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button(action: onCompose) {
-                Label("New routine", systemImage: "plus")
-                    .font(MiloTheme.Text.base.weight(.semibold))
-                    .foregroundStyle(MiloTheme.accentOn)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(MiloTheme.accent, in: Capsule())
-            }
-            .disabled(model.busy)
-            .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
-            .padding(.horizontal, MiloTheme.margin)
-            .padding(.top, MiloTheme.Space.two)
-            .padding(.bottom, MiloTheme.Space.two)
+            MiloCornerActionButton(
+                title: "New routine",
+                disabled: model.busy,
+                action: onCompose
+            )
         }
         .refreshable {
             await model.refreshRoutines()
