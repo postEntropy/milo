@@ -51,7 +51,7 @@ import {
   type CommandContext,
   type TurnControlTarget,
 } from '../../commands.js'
-import { changeCounts, showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
+import { changeCounts, showsToolCall, toolApprovalTitle, toolDetail, toolDisplayName } from '../../tool-line.js'
 import { copyToClipboard, setMouseTracking } from '../ansi.js'
 import { Composer, truncateLine, wrapComposerLines } from '../components/composer.js'
 import { FolderPicker, type RecentFolder } from '../components/folder-picker.js'
@@ -1665,7 +1665,7 @@ export function ChatScreen({
         />
       ) : permission ? (
         <Box flexDirection="column" paddingX={2}>
-          <Text color={activeTheme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
+          <Text color={activeTheme.warning}>⚠ {toolApprovalTitle(permission.tool)}:</Text>
           <Text color={activeTheme.warning}>  {permission.summary}</Text>
           {permission.approvalScope && <Text color={activeTheme.muted}>  {permission.approvalScope}</Text>}
           <Text color={activeTheme.muted}>{permission.approvalScope ? '[y] allow · [a] allow for session · [n] deny' : '[y] allow · [n] deny'}</Text>

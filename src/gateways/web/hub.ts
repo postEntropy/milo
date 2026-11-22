@@ -36,6 +36,7 @@ import { logWarn } from '../../util/log.js'
 import { prepareTurnMedia } from '../media.js'
 import { MAX_INCOMING_TOTAL_BYTES, type IncomingFile } from '../../core/media.js'
 import { saveCommandCodeAttachments } from '../../core/command-code-attachments.js'
+import { ComputerPreviewStore } from '../../core/computer/preview-store.js'
 import { listCommandCodeModels } from '../../core/command-code-models.js'
 import type { ImagePart } from '../../core/providers/types.js'
 
@@ -87,6 +88,8 @@ const WORK_CHANGED_FLOOR_MS = 1_000
 
 export interface WebClient {
   send(frame: ServerFrame): void
+  /** Authorization identity of the connected client ('owner' or 'device:<id>'). */
+  principal?: string
 }
 
 /**
@@ -112,6 +115,8 @@ interface LiveTurn {
   frames: ServerFrame[]
   /** The chat whose queue runs this turn; a sibling's own message joins it. */
   owner: string
+  /** Authorization principal of the client that initiated this turn; scopes ephemeral previews. */
+  ownerPrincipal: string
   /**
    * The permission the turn is waiting on, when it is waiting on one. It goes out as
    * its own frame, so a client that arrives after it did never saw it — and a
@@ -159,6 +164,8 @@ export class WebHub {
   private readonly live = new Map<string, LiveTurn>()
   private readonly turns = new TurnQueue()
   private readonly pending = new PendingDecisions()
+  /** Bounded in-memory screenshot previews for expanded Computer Use tool rows. */
+  readonly previews = new ComputerPreviewStore()
   /**
    * The files delivered into this process's chats, by id. Only what is
    * here is ever served, so the browser cannot ask for a path of its own naming.
@@ -317,7 +324,11 @@ export class WebHub {
     // turn's own frames so a surface that appends has the history under the turn rather
     // than around it.
     for (const chunk of rest) client.send({ type: 'history', messages: chunk })
-    if (running) for (const frame of running.frames) client.send(frame)
+    if (running) {
+      for (const frame of running.frames) {
+        client.send(this.frameForClient(frame, client, running.ownerPrincipal))
+      }
+    }
     // A question the turn is still waiting on, sent again under the id it already
     // had: the deadline is the daemon's, so the countdown this client draws is the
     // one that is actually running rather than a fresh five minutes.
@@ -349,6 +360,15 @@ export class WebHub {
   /** Whether a session currently has a live turn in flight on this daemon. */
   isLive(sessionId: string): boolean {
     return this.live.has(sessionId)
+  }
+
+  /** Whether the given Session exists and is accessible on this daemon. */
+  canAccessSession(sessionId: string): boolean {
+    if (this.live.has(sessionId)) return true
+    for (const chat of this.chats.values()) {
+      if (chat.session.id === sessionId) return true
+    }
+    return false
   }
 
   private pruneIdleChats(): void {
@@ -391,7 +411,7 @@ export class WebHub {
           client.send({ type: 'error', message: 'This Command Code turn is no longer awaiting recovery.' })
           return
         }
-        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, pending.input, undefined, [], undefined, pending.id)
+        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, pending.input, undefined, [], undefined, pending.id, undefined, undefined, client.principal)
         return
       }
       if (frame.action === 'stop') {
@@ -418,7 +438,7 @@ export class WebHub {
         }
         chat.session.setPlan(false)
         this.emitTurn(chat.session.id, { type: 'plan', plan: false })
-        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, PLAN_APPROVAL)
+        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, PLAN_APPROVAL, undefined, [], undefined, undefined, undefined, undefined, client.principal)
       } else if (frame.id) {
         const allowed = frame.action !== 'deny'
         const remember = frame.action === 'always'
@@ -483,7 +503,7 @@ export class WebHub {
           turn: turnOf(this.turns, key),
           start: (pending) => {
             queued = true
-            this.startTurn(key, pending, frame.target, [], undefined, undefined, frame.requestId)
+            this.startTurn(key, pending, frame.target, [], undefined, undefined, frame.requestId, undefined, client.principal)
           },
         })
         if (!queued) {
@@ -506,7 +526,7 @@ export class WebHub {
         return
       }
       if (files.length) {
-        this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId, frame.mentions)
+        this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId, frame.mentions, client.principal)
         accept()
         return
       }
@@ -519,7 +539,7 @@ export class WebHub {
           return
         }
       }
-      this.startTurn(key, frame.text, frame.target, [], undefined, undefined, frame.requestId, frame.mentions)
+      this.startTurn(key, frame.text, frame.target, [], undefined, undefined, frame.requestId, frame.mentions, client.principal)
       accept()
       return
     }
@@ -578,6 +598,7 @@ export class WebHub {
     this.ideaWork?.controller.abort()
     for (const staged of this.stagedUploads.values()) clearTimeout(staged.timer)
     this.stagedUploads.clear()
+    this.previews.close()
     this.browserWatchers.clear()
     this.browserUrlWatch?.()
     this.browserUrlWatch = null
@@ -1164,7 +1185,7 @@ export class WebHub {
     }
   }
 
-  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string, requestId?: string, mentions?: ExplicitMentionRef[]): void {
+  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string, requestId?: string, mentions?: ExplicitMentionRef[], ownerPrincipal = 'owner'): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
@@ -1190,7 +1211,7 @@ export class WebHub {
       let live: LiveTurn | undefined
       let turnStarted = false
       if (activeChat && sessionId) {
-        live = { id, at: Date.now(), frames: [], from: activeChat.session.messages.length, owner: chatId }
+        live = { id, at: Date.now(), frames: [], from: activeChat.session.messages.length, owner: chatId, ownerPrincipal }
         this.live.set(sessionId, live)
       }
       // Said again now the live turn is open: the state frame the caller sent when it
@@ -1373,6 +1394,25 @@ export class WebHub {
               this.broadcastPanel(chat)
               continue
             }
+            if (event.type === 'tool-end') {
+              const { previewImage, ...rest } = event
+              const preview =
+                previewImage && display.tools === 'full' && sessionId
+                  ? await this.previews.put({
+                      callId: event.id,
+                      sessionId,
+                      ownerPrincipal,
+                      ...previewImage,
+                    })
+                  : null
+              displayEvent(
+                { ...rest, ...(preview ? { preview } : {}) },
+                id,
+                display,
+                (frame) => { if (sessionId) this.emitTurn(sessionId, frame) },
+              )
+              continue
+            }
             displayEvent(event, id, display, (frame) => { if (sessionId) this.emitTurn(sessionId, frame) })
           }
           currentImages = []
@@ -1461,7 +1501,7 @@ export class WebHub {
     const key = this.liveOwner(chat.session.id) ?? chat.scope.chatId
     const result = handleTurnControl(text, {
       turn: turnOf(this.turns, key),
-      start: (pending) => this.startTurn(key, pending),
+      start: (pending) => this.startTurn(key, pending, undefined, [], undefined, undefined, undefined, undefined, client.principal),
     })
     if (result.handled) {
       if (messageId) {
@@ -1615,14 +1655,31 @@ export class WebHub {
    * from these frames and nowhere else. Replaying them alongside a ready that also
    * held them is what split one answer into two rows.
    */
+  private frameForClient(frame: ServerFrame, client: WebClient, ownerPrincipal?: string): ServerFrame {
+    if (
+      ownerPrincipal &&
+      frame.type === 'event' &&
+      frame.event.type === 'tool-end' &&
+      frame.event.preview &&
+      (client.principal ?? 'owner') !== ownerPrincipal
+    ) {
+      const { preview: _preview, ...rest } = frame.event
+      return { ...frame, event: rest }
+    }
+    return frame
+  }
+
   private emitTurn(sessionId: string, frame: ServerFrame): void {
     // The row's sentence rides here, where every turn frame passes: the daemon's own words,
     // so a surface that cannot import them — the phone — draws what the browser draws. It is
     // on the kept frame too, so a client that arrives late replays it with the step.
     const outgoing = withWords(frame)
-    this.live.get(sessionId)?.frames.push(outgoing)
+    const live = this.live.get(sessionId)
+    live?.frames.push(outgoing)
     for (const chat of this.chatsOf(sessionId)) {
-      for (const client of chat.clients) client.send(outgoing)
+      for (const client of chat.clients) {
+        client.send(this.frameForClient(outgoing, client, live?.ownerPrincipal))
+      }
     }
   }
 

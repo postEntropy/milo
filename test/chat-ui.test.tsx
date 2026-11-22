@@ -489,7 +489,7 @@ describe('ChatScreen', () => {
 
     const { lastFrame, stdin } = renderChat(runtime)
     await submit(stdin, 'run it')
-    expect(lastFrame()).toContain('Shell')
+    expect(lastFrame()).toContain('Allow shell command')
     expect(lastFrame()).toContain('rm -rf build')
 
     stdin.write('n')

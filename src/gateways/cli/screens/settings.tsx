@@ -16,6 +16,7 @@ import {
   type ProfileOrigin,
   type ProfileSource,
 } from '../../../core/browser/index.js'
+import { CuaDriverAdapter, type ComputerCapabilityStatus } from '../../../core/computer/index.js'
 import { mutateConfig, mutateAuth } from '../../../core/settings.js'
 import { readAuth } from '../../../core/config/load.js'
 import {
@@ -227,6 +228,7 @@ type View =
   | { kind: 'browserProfile' }
   | { kind: 'browserProfileConfirm'; source: ProfileSource }
   | { kind: 'browserEdit'; field: 'chromePath' | 'cdpUrl' | 'profileDir' }
+  | { kind: 'computer' }
   | { kind: 'gateways' }
   | { kind: 'gatewayFlow'; id: GatewayId; steps: FlowStep[]; step: FlowStep }
   | { kind: 'web' }
@@ -264,6 +266,7 @@ const TITLE: Record<string, string> = {
   browserProfile: 'Setup · Tools · Browser',
   browserProfileConfirm: 'Setup · Tools · Browser',
   browserEdit: 'Setup · Tools · Browser',
+  computer: 'Setup · Tools · Computer Use',
   gateways: 'Setup · Gateways',
   web: 'Setup · Web',
   webEdit: 'Setup · Web',
@@ -365,6 +368,16 @@ export function SettingsScreen({
     // Re-probed whenever the value it resolved from changes, which is what
     // naming a different binary — or clearing one — does.
   }, [config.browser.chromePath, probeBrowser])
+
+  const [computerStatus, setComputerStatus] = useState<ComputerCapabilityStatus | null>(null)
+  const probeComputer = useCallback(async (): Promise<void> => {
+    const adapter = new CuaDriverAdapter()
+    try {
+      setComputerStatus(await adapter.probe())
+    } finally {
+      await adapter.close()
+    }
+  }, [])
 
   /** The profile in use, and whether the browser will refuse to open it. */
   const profilePath = config.browser.profileDir
@@ -734,6 +747,21 @@ export function SettingsScreen({
       hintColor: !config.browser.enabled ? theme.accent : browser.path ? theme.success : theme.danger,
     },
     {
+      label: 'Computer Use',
+      hint: !(config.computer?.enabled ?? false)
+        ? 'off'
+        : !computerStatus
+          ? 'on'
+          : computerStatus.summary,
+      hintColor: !(config.computer?.enabled ?? false)
+        ? theme.accent
+        : !computerStatus
+          ? theme.success
+          : computerStatus.available
+            ? theme.success
+            : theme.danger,
+    },
+    {
       // Named for both halves, because the grant is one and the tools are two
       // pairs: mail and files. The hint is the state, like its neighbours — what
       // to do about it belongs to the panel this opens.
@@ -752,6 +780,7 @@ export function SettingsScreen({
   const optionalTools = [
     ...(config.search ? [`web search ${config.search.provider}`] : []),
     ...(config.browser.enabled ? ['browser'] : []),
+    ...(config.computer?.enabled ? ['computer use'] : []),
     ...(config.google.enabled ? ['google'] : []),
   ]
   const toolsHint = optionalTools.join(' · ') || 'none enabled'
@@ -841,6 +870,19 @@ export function SettingsScreen({
     {
       label: 'Output limit',
       hint: config.maxTokens ? `${config.maxTokens} tokens` : 'wire default (4096 on Anthropic)',
+    },
+  ]
+
+  const computerItems: MenuItem[] = [
+    {
+      label: 'Computer Use',
+      hint: config.computer?.enabled ? 'on' : 'off',
+      hintColor: config.computer?.enabled ? theme.success : theme.accent,
+    },
+    {
+      label: 'Check host status',
+      hint: computerStatus ? computerStatus.summary : 'checking…',
+      hintColor: !computerStatus ? theme.muted : computerStatus.available ? theme.success : theme.danger,
     },
   ]
 
@@ -1262,6 +1304,9 @@ export function SettingsScreen({
             // known and refreshes itself.
             void probeBrowser(config.browser.chromePath)
             go({ kind: 'browser' })
+          } else if (index === 2) {
+            void probeComputer()
+            go({ kind: 'computer' })
           } else go({ kind: 'google' })
         } else if (key.escape) go({ kind: 'menu' })
         break
@@ -1381,6 +1426,28 @@ export function SettingsScreen({
 
       case 'displayEdit':
         if (key.escape) go({ kind: 'display' })
+        break
+
+      case 'computer':
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(computerItems.length - 1, value + 1))
+        else if (key.return) {
+          if (index === 0) {
+            const enabled = !(config.computer?.enabled ?? false)
+            patchConfig({ computer: { ...(config.computer ?? { enabled: false }), enabled } })
+            setNotices([
+              {
+                text: enabled
+                  ? 'Computer Use on — the desktop tools arrive with the next session'
+                  : 'Computer Use off — applies from the next session',
+                tone: 'success',
+              },
+            ])
+          } else {
+            void probeComputer()
+            setNotices([{ text: 'Refreshing host desktop capability status…', tone: 'success' }])
+          }
+        } else if (key.escape) go({ kind: 'tools' })
         break
 
       case 'browser':
@@ -1994,6 +2061,30 @@ export function SettingsScreen({
               <Text color={theme.accent}>❯ </Text>
               <TextInput key={view.field} value={text} onChange={setText} onSubmit={saveText} />
             </Box>
+          </Box>
+        )}
+
+        {view.kind === 'computer' && (
+          <Box flexDirection="column">
+            <Menu items={computerItems} index={index} />
+            <Box marginTop={1} flexDirection="column">
+              <Text color={theme.muted}>
+                Drive native desktop applications on this machine. In Ask and Auto modes, approval covers observing one window for the current turn and each action asks separately; Unrestricted mode runs both without prompting.
+              </Text>
+              <Text color={theme.muted}>
+                Unavailable in Plan mode, routines, delegated work, and shared chats.
+              </Text>
+              {computerStatus && computerStatus.limitations.length > 0 ? (
+                <Box marginTop={1} flexDirection="column">
+                  {computerStatus.limitations.map((limitation) => (
+                    <Text key={limitation} color={theme.warning}>
+                      • {limitation}
+                    </Text>
+                  ))}
+                </Box>
+              ) : null}
+            </Box>
+            <Notices notices={notices} />
           </Box>
         )}
 

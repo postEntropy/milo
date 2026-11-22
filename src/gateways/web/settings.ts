@@ -19,6 +19,7 @@ import {
   type ChatGptLogin,
 } from '../../core/chatgpt/auth.js'
 import { googleToolNames, googleWriteToolNames } from '../../core/tools/index.js'
+import { CuaDriverAdapter, type ComputerCapabilityStatus } from '../../core/computer/index.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS } from '../../core/google/tiers.js'
 import {
@@ -330,6 +331,7 @@ export class WebSettings {
       case 'routine-runs': return this.routines.routineRuns(body)
       case 'run-transcript': return this.routines.runTranscript(body)
       case 'browsers': return this.browsers()
+      case 'computer-status': return this.probeComputer(true)
       case 'profiles': return this.profiles()
       case 'mcp': return this.mcpReport()
       case 'mcp-reload': return this.mcpReload()
@@ -434,7 +436,9 @@ export class WebSettings {
         permissionMode: this.runtime.permissions?.mode ?? 'ask',
         skills: this.runtime.skills.map(({ name, description }) => ({ name, description })),
         browser: Boolean(this.runtime.browser),
+        computer: Boolean(this.runtime.computer),
       },
+      computer: await this.probeComputer(),
       // The grant, never the secret: the state, and the names of what it bought.
       // `googleState` is the same function `milo google status` and the setup
       // screen read, so the three cannot disagree about it.
@@ -879,6 +883,23 @@ export class WebSettings {
     const result = await this.runtime.memory.update(INSTALL_SCOPE, id, text)
     if (!result.ok) throw new Error(result.error)
     return result
+  }
+
+  private cachedComputerStatus: ComputerCapabilityStatus | null = null
+
+  private async probeComputer(fresh = false): Promise<ComputerCapabilityStatus> {
+    if (this.runtime.computer) {
+      return this.runtime.computer.probe(undefined, { fresh })
+    }
+    if (!fresh && this.cachedComputerStatus) return this.cachedComputerStatus
+    const adapter = new CuaDriverAdapter()
+    try {
+      const status = await adapter.probe()
+      this.cachedComputerStatus = status
+      return status
+    } finally {
+      await adapter.close()
+    }
   }
 
   private async browsers(): Promise<unknown> {

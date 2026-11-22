@@ -32,7 +32,7 @@ import {
   type DiscordBuilders,
 } from '../actions.js'
 import { projectNames } from '../../core/projects.js'
-import { toolDisplayName } from '../tool-line.js'
+import { toolApprovalTitle } from '../tool-line.js'
 
 export interface DiscordGatewayOptions {
   runtime: AgentRuntime
@@ -157,7 +157,7 @@ export class DiscordGateway implements Gateway {
       let prompt: Message
       try {
         prompt = await target.reply({
-          content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`,
+          content: `⚠ ${toolApprovalTitle(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`,
           components: [row],
         })
       } catch {

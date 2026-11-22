@@ -107,11 +107,17 @@ export type ThinkingDisplay = (typeof THINKING_LEVELS)[number]
 export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
 export const SEARCH_PROVIDERS = ['off', 'tavily', 'exa', 'parallel'] as const
 
+export interface ToolPreviewRef {
+  id: string
+  width: number
+  height: number
+}
+
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string; input?: string }
-  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; drawFailure?: boolean; change?: FileChange[] }
+  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; drawFailure?: boolean; change?: FileChange[]; preview?: ToolPreviewRef }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }
   | { type: 'ui'; render: GenUiRender; draft?: boolean }
@@ -376,6 +382,10 @@ export interface ToolMark {
    * where the call wrote nothing.
    */
   change?: FileChange[]
+  /** Opaque in-memory preview reference for expanded Computer Use rows (never persisted). */
+  preview?: ToolPreviewRef
+  /** Tool call id used to bind preview fetches to the exact call. */
+  callId?: string
 }
 
 /** One piece of a turn as the page draws it, in the order it happened. */

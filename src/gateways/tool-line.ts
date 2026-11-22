@@ -70,6 +70,10 @@ const TOOLS: Record<string, { icon: string; label: string; brand?: ToolBrand }> 
   browser_snapshot: { icon: '👁️', label: 'Snapshot' },
   browser_screenshot: { icon: '📸', label: 'Screenshot' },
   browser_act: { icon: '🖱️', label: 'Browser' },
+  computer_list: { icon: '🖥️', label: 'Listed windows' },
+  computer_open: { icon: '🪟', label: 'Opened window' },
+  computer_snapshot: { icon: '👁️', label: 'Observed window' },
+  computer_act: { icon: '🖱️', label: 'Desktop' },
   // Every email tool wears the one envelope — the browser draws the same mail mark,
   // and a chat client, which can only draw a character, wears this one.
   gmail_search: { icon: '📧', label: 'Searched email' },
@@ -104,6 +108,36 @@ export function toolDisplayName(name: string): string {
   if (entry) return entry.label
   const mcp = MCP_NAME.exec(name)
   return mcp ? `${mcp[1]}: ${mcp[2]}` : name
+}
+
+const APPROVAL_TITLES: Record<string, string> = {
+  computer_open: 'Allow window access',
+  computer_act: 'Allow desktop action',
+  shell_command: 'Allow shell command',
+  write_file: 'Allow writing file',
+  edit_file: 'Allow editing file',
+  apply_patch: 'Allow applying patch',
+  format: 'Allow formatting',
+  git_commit: 'Allow git commit',
+  gmail_send: 'Allow sending email',
+  gmail_draft: 'Allow drafting email',
+  gmail_modify: 'Allow modifying email',
+  mail_labels: 'Allow email label change',
+  browser_open: 'Allow opening page',
+  browser_act: 'Allow browser action',
+  routine: 'Allow routine change',
+  delegated_work: 'Allow delegated work',
+  crew: 'Allow crew change',
+  sessions: 'Allow session change',
+  instructions: 'Allow instruction change',
+  memories: 'Allow memory change',
+  job_kill: 'Allow stopping job',
+  send_file: 'Allow sending file',
+}
+
+/** Pending-action heading for an approval prompt, shared across surfaces. */
+export function toolApprovalTitle(name: string): string {
+  return APPROVAL_TITLES[name] ?? `Allow ${toolDisplayName(name)}`
 }
 
 /** The plug, for a tool that runs on someone else's server. */
@@ -412,7 +446,7 @@ export function toolDetail(args: unknown): string {
   // alone would otherwise answer for it and lose the verb.
   if (typeof record.action === 'string' && record.action.trim()) {
     const action = record.action.trim()
-    const target = [record.path, record.id, record.name, record.text, record.key].find(
+    const target = [record.path, record.id, record.name, record.ref, record.text, record.key, record.direction].find(
       (value) => typeof value === 'string' && value.trim() !== '',
     )
     return gist(`${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`)
@@ -450,7 +484,7 @@ export function toolDetail(args: unknown): string {
     const botId = typeof record.botId === 'string' && record.botId.trim() ? record.botId.trim() : ''
     return gist([base, modelTag, botId].filter(Boolean).join(' · '))
   }
-  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app', 'message', 'mode']) {
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app', 'windowId', 'message', 'mode']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return gist(value)
   }

@@ -41,7 +41,7 @@ import {
   type ActionContext,
 } from '../actions.js'
 import { projectNames } from '../../core/projects.js'
-import { toolDisplayName } from '../tool-line.js'
+import { toolApprovalTitle } from '../tool-line.js'
 
 export interface TelegramGatewayOptions {
   runtime: AgentRuntime
@@ -504,7 +504,7 @@ export class TelegramGateway implements Gateway {
     const id = randomUUID()
     let promptId: number | undefined
     try {
-      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`, {
+      const prompt = await bot.api.sendMessage(chatId, `⚠ ${toolApprovalTitle(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`, {
         reply_markup: {
           inline_keyboard: [
             [

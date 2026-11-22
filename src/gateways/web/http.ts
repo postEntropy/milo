@@ -160,6 +160,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     const credential = suppliedToken(request, url.searchParams.get('t'))
     const owner = matches(credential, token)
     const device = owner ? undefined : deviceForToken(credential)
+    const principal = owner ? 'owner' : device ? `device:${device.id}` : ''
     const stillAuthorized = () => owner || (device !== undefined && deviceForToken(credential)?.id === device.id)
     if (!stillAuthorized()) {
       socket.terminate()
@@ -167,12 +168,17 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     }
     // Revocation is normally written by a separate `milo devices` process.
     const check = device ? setInterval(() => {
-      if (!stillAuthorized()) socket.terminate()
+      if (!stillAuthorized()) {
+        hub.previews.revokePrincipal(principal)
+        socket.terminate()
+      }
     }, 1000) : undefined
     let chatId: string | undefined
     const client = {
+      principal,
       send(frame: ServerFrame): void {
         if (!stillAuthorized()) {
+          if (principal) hub.previews.revokePrincipal(principal)
           socket.terminate()
           return
         }
@@ -351,6 +357,41 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
       return json(response, 400, { error: error instanceof Error ? error.message : String(error) })
     }
   }
+  if (url.pathname.startsWith('/api/tool-preview/')) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return json(response, 405, { error: 'Use GET.' })
+    }
+    const principal = resolvePrincipal(request, token, null)
+    if (isOpaqueOrigin(request) || !principal) {
+      response.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: 'Unauthorized.' }))
+      return
+    }
+    const id = decodeURIComponent(url.pathname.slice('/api/tool-preview/'.length))
+    const looked = hub.previews.get(id, {
+      principal,
+      callId: url.searchParams.get('callId'),
+      sessionId: url.searchParams.get('sessionId'),
+      canAccessSession: (sessionId) => hub.canAccessSession(sessionId),
+    })
+    if (!looked.ok) {
+      response.writeHead(looked.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: looked.reason }))
+      return
+    }
+    response.writeHead(200, {
+      'content-type': looked.entry.mimeType,
+      'content-length': String(looked.entry.bytes.length),
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    })
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    response.end(looked.entry.bytes)
+    return
+  }
   if (url.pathname.startsWith('/api/')) {
     if (isOpaqueOrigin(request) || !authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
@@ -511,7 +552,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     // cached copy left an installed home screen opening on the old rules.
     'cache-control': page ? 'no-cache' : 'public, max-age=3600',
     'x-content-type-options': 'nosniff',
-    'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+    'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
   })
   if (request.method === 'HEAD') {
     response.end()
@@ -559,10 +600,16 @@ function headerName(name: string): string {
  * (such as the iPhone app, which shares the same surfaces including settings and
  * can be revoked independently via `milo devices`).
  */
-function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
+function resolvePrincipal(request: IncomingMessage, token: string, queryToken?: string | null): string | null {
   const supplied = suppliedToken(request, queryToken)
-  if (matches(supplied, token)) return true
-  return deviceForToken(supplied) !== undefined
+  if (!supplied) return null
+  if (matches(supplied, token)) return 'owner'
+  const device = deviceForToken(supplied)
+  return device ? `device:${device.id}` : null
+}
+
+function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
+  return resolvePrincipal(request, token, queryToken) !== null
 }
 
 function suppliedToken(request: IncomingMessage, queryToken?: string | null): string {
