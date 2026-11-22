@@ -940,44 +940,168 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .approval-time { display: flex; align-items: center; gap: var(--space-3); margin-inline-start: auto; color: var(--muted); font: var(--text-xs) var(--font-mono); }
 
 .settings-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; }
-/* Settings is two things side by side on a wide screen — the sections as a column, and
-   the one that is open — and one at a time on a phone (see the `max-width: 900px` block). */
-.settings-layout { display: flex; flex: 1; width: 100%; min-width: 0; margin: 0; }
-.settings-index { position: sticky; top: 0; display: flex; flex: none; align-self: flex-start; width: 280px; flex-direction: column; padding: 30px var(--space-7) var(--space-8) var(--space-9); border-inline-end: 1px solid var(--border-soft); }
-.settings-index-head, .settings-mobile-head { display: flex; align-items: center; gap: var(--space-5); padding-bottom: var(--space-7); }
-.settings-index-head h1, .settings-mobile-head h1 { margin: 0; font-size: var(--text-lg); font-weight: 600; letter-spacing: -.01em; }
-.settings-strip-back { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--accent); transition: background var(--motion-fast); }
-.settings-strip-back:hover { background: var(--border-soft); }
+/* Settings is a focused two-pane layout on wide screens — a calm grouped nav rail
+   beside a constrained ~680px reading column — and a single-pane flow on phones. */
+.settings-layout { display: flex; flex: 1; width: min(1040px, 100%); min-width: 0; margin-inline: auto; }
+.settings-index { position: sticky; top: 0; display: flex; flex: none; align-self: flex-start; width: 236px; flex-direction: column; padding: var(--space-10) var(--space-6) var(--space-9) var(--space-8); }
+.settings-index-head, .settings-mobile-head { display: flex; align-items: center; gap: var(--space-5); padding-bottom: var(--space-8); }
+.settings-index-head h1, .settings-mobile-head h1 { margin: 0; font-size: var(--text-xl); font-weight: 600; letter-spacing: -.015em; }
+.settings-strip-back { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.settings-strip-back:hover { background: var(--border-soft); color: var(--fg); }
 .settings-mobile-head { padding-top: 0; }
+.settings-index-groups { display: flex; flex-direction: column; gap: var(--space-7); }
+.settings-index-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.settings-index-group-label { padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .settings-index-list { display: flex; flex-direction: column; gap: var(--space-1); }
-.settings-index-row { display: flex; align-items: center; gap: var(--space-6); width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-6); color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
-.settings-index-row > svg.icon { flex: none; color: var(--muted); }
-.settings-index-row:hover, .settings-index-row.active { background: var(--surface); }
-.settings-index-row.active { color: var(--fg); }
-.settings-index-row > svg.icon:last-child { display: none; }
-.settings-index-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--space-1); }
-.settings-index-label-row { display: flex; align-items: center; gap: var(--space-3); }
-.settings-index-label { font-size: var(--text-sm); font-weight: 500; }
+.settings-index-row { display: flex; align-items: center; gap: var(--space-5); width: 100%; min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5); color: var(--fg-2); text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.settings-index-row > svg.icon { flex: none; color: var(--fg-2); opacity: .82; transition: color var(--motion-fast), opacity var(--motion-fast); }
+.settings-index-row:hover { background: var(--surface); color: var(--fg); }
+.settings-index-row:hover > svg.icon { opacity: 1; }
+.settings-index-row.active { background: var(--accent-wash); color: var(--fg); }
+.settings-index-row.active > svg.icon { color: var(--accent); opacity: 1; }
+.settings-index-row > svg.settings-index-chevron { display: none; margin-inline-start: auto; color: var(--muted); opacity: .6; }
+.settings-index-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 500; }
 .settings-index-row.active .settings-index-label { font-weight: 600; }
 .settings-index-dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
-.settings-index-summary { overflow: hidden; color: var(--muted); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
-/* The settings that are rarely touched, one tap away: a filled row, not an outline, that
-   opens in place. */
-.settings-advanced { margin-top: var(--space-8); }
-.settings-advanced > summary { display: flex; min-height: var(--control-md); align-items: center; justify-content: space-between; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-7); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; list-style: none; cursor: pointer; transition: background var(--motion-fast); }
-.settings-advanced > summary::-webkit-details-marker { display: none; }
-.settings-advanced > summary::after { content: ''; width: 7px; height: 7px; border-inline-end: 1.5px solid currentColor; border-block-end: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform var(--motion-fast); }
-.settings-advanced[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
-.settings-advanced > summary:hover { background: var(--border-soft); }
-.settings-advanced-body { padding-top: var(--space-7); }
+
 /* The panel stack takes up the slack so the save bar's own place is the bottom
-   of the screen: sticky only pins it while the content runs past the view, and
-   on a short section it would otherwise sit in the middle of the page. */
-.settings-inner { display: flex; flex: 1; width: min(1040px, 100%); flex-direction: column; margin: 0 auto; padding: 30px 32px 0; }
-.settings-layout .settings-inner { width: auto; min-width: 0; flex: 1; margin: 0; padding: 30px var(--space-10) 0 var(--space-10); }
-.settings-panel-stack { flex: 1; width: 100%; max-width: 1180px; }
-.settings-section { width: 100%; margin-bottom: 30px; }
+   of the screen. */
+.settings-inner { display: flex; flex: 1; width: min(1040px, 100%); flex-direction: column; margin: 0 auto; padding: var(--space-10) var(--space-10) 0; }
+.settings-layout .settings-inner { width: auto; min-width: 0; flex: 1; margin: 0; padding: var(--space-10) var(--space-10) 0 var(--space-9); }
+.settings-panel-stack { flex: 1; width: 100%; max-width: 680px; }
+.settings-loading { color: var(--muted); font-size: var(--text-sm); }
+.settings-section { width: 100%; margin-bottom: var(--space-10); }
 .settings-section[hidden] { display: none; }
+.settings-section-head { padding: 0 0 var(--space-8); }
+.settings-section-head h2 { margin: 0; color: var(--fg); font-size: var(--text-xl); font-weight: 600; letter-spacing: -.015em; }
+.settings-section-head p { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
+.settings-section-body { display: flex; flex-direction: column; gap: var(--space-8); }
+.settings-groups-stack { display: flex; flex-direction: column; gap: var(--space-8); }
+
+/* Grouped surface container with hairline row dividers. */
+.settings-group { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.settings-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); padding-inline: var(--space-2); }
+.settings-group-head-left { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; }
+.settings-group-title { margin: 0; color: var(--fg-2); font-size: var(--text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.settings-group-meta { color: var(--muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.settings-group-action { flex: none; }
+.settings-group-body { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); }
+.settings-group-footer { padding: var(--space-1) var(--space-2) 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
+
+/* Individual rows inside a grouped surface. */
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-7); padding: var(--space-5) var(--space-6); }
+.settings-group-body > * + * { border-top: 1px solid var(--border-soft); }
+.settings-row.is-disabled .settings-row-info { opacity: .55; }
+.settings-row-stack { flex-direction: column; align-items: stretch; gap: var(--space-4); }
+.settings-row-info { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-1); }
+.settings-row-label { display: flex; align-items: center; gap: var(--space-3); color: var(--fg); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; }
+.settings-row-desc { margin: 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.45; overflow-wrap: anywhere; }
+.settings-row-control { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: var(--space-3); }
+.settings-row-field { width: 100%; }
+.settings-empty-inline { margin: 0; color: var(--muted); font-size: var(--text-xs); }
+.settings-error-text { color: var(--danger); }
+
+/* Crisp editable fields sitting inside `--surface` cards. */
+.settings-input { width: 100%; min-height: var(--control-md); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-3) var(--space-5); color: var(--fg); font-size: var(--text-sm); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+.settings-input:hover { border-color: var(--border); }
+.settings-input:focus { outline: 0; border-color: var(--border); box-shadow: var(--focus-ring); }
+.settings-input::placeholder { color: var(--muted); }
+.settings-input-num { width: 104px; text-align: end; font-variant-numeric: tabular-nums; }
+.settings-input-md { width: 180px; }
+.settings-textarea { min-height: 76px; resize: vertical; }
+.settings-select-wrap { min-width: 176px; }
+.settings-select-wrap .select-trigger { min-height: var(--control-md); border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-2) var(--space-5); }
+.settings-select-wrap .select-trigger:hover { background: var(--surface-raised); }
+
+/* Compact filled buttons inside setting rows. */
+.button.settings-btn-sm { min-height: var(--control-sm); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-5); font-size: var(--text-xs); background: var(--surface-raised); box-shadow: var(--shadow-sm); }
+.button.settings-btn-sm:hover { background: var(--border-soft); }
+.button.settings-btn-sm.primary { background: var(--accent); color: var(--accent-on); box-shadow: none; }
+.button.settings-btn-sm.primary:hover { background: var(--accent-hover); }
+.button.settings-btn-sm.danger { background: color-mix(in oklab, var(--danger) 11%, var(--surface-raised)); color: var(--danger); box-shadow: none; }
+.button.settings-btn-sm.danger:hover { background: color-mix(in oklab, var(--danger) 18%, var(--surface-raised)); }
+.button.settings-btn-icon { width: var(--control-sm); min-height: var(--control-sm); border-radius: var(--radius-sm); padding: 0; background: var(--surface-raised); box-shadow: var(--shadow-sm); }
+.button.settings-btn-icon:hover { background: var(--border-soft); }
+.button.settings-btn-icon.danger { background: color-mix(in oklab, var(--danger) 11%, var(--surface-raised)); color: var(--danger); box-shadow: none; }
+.settings-inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+.settings-input-action { display: flex; align-items: center; gap: var(--space-3); width: 100%; }
+.settings-input-action .settings-input { flex: 1; min-width: 0; }
+.settings-choice-row { padding-top: var(--space-2); }
+
+/* Filled segmented control for 2–4 mutually exclusive options. */
+.settings-segmented { display: inline-flex; flex: none; align-items: center; gap: var(--space-1); margin: 0; border: 0; border-radius: var(--radius-sm); background: var(--track); padding: 3px; }
+:root[data-theme='dark'] .settings-segmented { background: var(--bg); }
+.settings-segmented-item { min-height: var(--control-sm); border: 0; border-radius: var(--radius-xs); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast); }
+.settings-segmented-item:hover { color: var(--fg); }
+.settings-segmented-item.active { background: var(--surface-raised); color: var(--fg); font-weight: 600; box-shadow: var(--shadow-sm); }
+
+/* Compact slider inside Settings, matching the composer's refined proportion. */
+.settings-effort-wrap { --slider-thumb: 18px; --slider-track: 14px; width: 204px; }
+.settings-effort-wrap .reasoning-slider { gap: var(--space-1); }
+.settings-effort-wrap .reasoning-slider input[type='range'] { height: 20px; }
+.settings-effort-wrap .reasoning-slider input[type='range']::-webkit-slider-runnable-track { height: var(--slider-track); background: linear-gradient(90deg, var(--accent) calc(var(--slider-thumb) / 2 + (100% - var(--slider-thumb)) * var(--p)), var(--track) 0); }
+.settings-effort-wrap .reasoning-slider input[type='range']::-moz-range-track { height: var(--slider-track); background: var(--track); }
+.settings-effort-wrap .reasoning-slider input[type='range']::-moz-range-progress { height: var(--slider-track); background: var(--accent); }
+.settings-effort-wrap .reasoning-slider input[type='range']::-webkit-slider-thumb { width: var(--slider-thumb); height: var(--slider-thumb); margin-top: -2px; box-shadow: 0 1px 4px rgb(0 0 0 / 24%), 0 0 0 .5px rgb(0 0 0 / 8%); }
+.settings-effort-wrap .reasoning-slider input[type='range']::-moz-range-thumb { width: var(--slider-thumb); height: var(--slider-thumb); box-shadow: 0 1px 4px rgb(0 0 0 / 24%), 0 0 0 .5px rgb(0 0 0 / 8%); }
+.settings-effort-wrap .reasoning-slider-dot { width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; }
+
+/* Collapsible disclosure for secondary settings and setup guides. */
+.settings-disclosure { display: flex; flex-direction: column; }
+.settings-disclosure-summary { display: flex; min-height: var(--control-md); align-items: center; gap: var(--space-4); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-3) var(--space-6); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; list-style: none; cursor: pointer; transition: background var(--motion-fast); }
+.settings-row .settings-disclosure-summary { background: var(--bg); padding: var(--space-3) var(--space-5); border-radius: var(--radius-sm); }
+.settings-disclosure-summary::-webkit-details-marker { display: none; }
+.settings-disclosure-summary::after { content: ''; width: 6px; height: 6px; margin-inline-start: auto; border-inline-end: 1.5px solid currentColor; border-block-end: 1.5px solid currentColor; opacity: .65; transform: translateY(-2px) rotate(45deg); transition: transform var(--motion-fast); }
+.settings-disclosure[open] > .settings-disclosure-summary::after { transform: translateY(1px) rotate(-135deg); }
+.settings-disclosure-summary:hover { background: var(--border-soft); }
+.settings-disclosure-label { color: var(--fg); font-weight: 500; }
+.settings-disclosure-meta { color: var(--muted); font-size: var(--text-xs); font-weight: 400; }
+.settings-disclosure-body { padding-top: var(--space-5); }
+.settings-row .settings-disclosure-body { padding-top: var(--space-5); }
+
+/* API keys rows inside grouped surfaces. */
+.settings-key-row { flex-direction: column; align-items: stretch; gap: var(--space-4); }
+.settings-key-main { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); }
+.settings-key-identity { display: flex; min-width: 0; align-items: center; gap: var(--space-4); }
+.settings-key-identity > svg.provider-mark { flex: none; color: inherit; }
+.settings-key-status { flex: none; color: var(--muted); font: var(--text-xs) var(--font-mono); white-space: nowrap; }
+.settings-key-status.is-set { color: var(--success); }
+.settings-key-editor { width: 100%; }
+
+/* Selectable choice rows (Recall by meaning). */
+.settings-choice-row-btn { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-6); border: 0; background: transparent; padding: var(--space-5) var(--space-6); color: var(--fg); text-align: start; transition: background var(--motion-fast); }
+.settings-choice-row-btn:hover:not(:disabled) { background: var(--surface-warm); }
+.settings-choice-row-btn.is-selected { background: var(--accent-wash); cursor: default; }
+.settings-choice-row-btn.is-selected:disabled { opacity: 1; }
+.settings-choice-row-btn > svg.icon { flex: none; color: var(--accent); }
+.settings-choice-info { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
+
+/* Status indicators, tags, links, search, and subfields. */
+.settings-status-label { display: inline-flex; align-items: center; gap: var(--space-3); }
+.settings-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.settings-dot.is-ok { background: var(--success); }
+.settings-dot.is-warn { background: var(--warn); }
+.settings-dot.is-err { background: var(--danger); }
+.settings-dot.is-off { background: var(--border); }
+.settings-tag { flex: none; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 8%, transparent); padding: 1px var(--space-3); color: var(--muted); font-size: var(--text-2xs); font-weight: 500; }
+.settings-tag-accent { background: var(--accent-wash); color: var(--accent); }
+.settings-link { color: var(--accent); text-decoration: none; font-weight: 500; }
+.settings-link:hover { text-decoration: underline; }
+.settings-inline-link { border: 0; background: transparent; padding: 0; color: var(--accent); font-size: inherit; font-weight: 500; cursor: pointer; }
+.settings-inline-link:hover { text-decoration: underline; }
+.settings-steps { margin: 0; padding-inline-start: var(--space-7); color: var(--fg-2); font-size: var(--text-xs); line-height: 1.65; display: flex; flex-direction: column; gap: var(--space-2); }
+.settings-steps-foot { margin-top: var(--space-4); }
+.settings-subfields { display: flex; flex-direction: column; gap: var(--space-5); }
+.settings-subfield { display: flex; flex-direction: column; gap: var(--space-2); }
+.settings-search-field { display: flex; align-items: center; gap: var(--space-4); width: 100%; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg); padding: 0 var(--space-5); color: var(--muted); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+.settings-search-field:focus-within { border-color: var(--border); box-shadow: var(--focus-ring); }
+.settings-search-field input { width: 100%; min-height: var(--control-md); border: 0; background: transparent; color: var(--fg); font-size: var(--text-sm); }
+.settings-search-field input:focus { outline: 0; }
+.settings-search-field input::placeholder { color: var(--muted); }
+.settings-note-row { align-items: flex-start; }
+.settings-note-edit { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-2); }
+
+/* Keep legacy `.panel-head` / `.panel-body` intact for other workspace views (Routines, Tasks, Analytics). */
 .settings-section .panel-head { flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: 0 0 var(--space-8); }
 .settings-section .panel-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; letter-spacing: -.01em; }
 .settings-section .panel-head p { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.55; }
@@ -986,17 +1110,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-section .panel-body { padding: 0; }
 .settings-section .panel-body > h3.section-label { padding-top: var(--space-7); }
 .settings-section .panel-body > h3.section-label:first-child { padding-top: 0; }
-/* The Display preview: the chat's own background, so every part reads as it will
-   in the chat — on `--surface` the tool line, the thing the setting changes,
-   would dissolve into the frame. */
-.settings-preview { margin-bottom: var(--space-8); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--bg); padding: var(--space-7) var(--space-7); }
-.settings-preview .thread-inner { padding: 0; }
-.settings-preview .message { padding-inline: 0; }
+
+/* The Display preview: compact and flush on the chat's own background. */
+.settings-preview { border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--bg); padding: var(--space-5) var(--space-6); }
+.settings-preview .thread-inner { padding: 0; gap: var(--space-4); }
+.settings-preview .message { padding: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-7); }
-/* A grid's own gap spaces its columns, not the next block: two stacked grids
-   would otherwise sit flush against each other. A general sibling rather than an
-   adjacent one, because whatever sits between them (the model picker on a phone)
-   is not a grid and would otherwise break the spacing. */
 .form-grid ~ .form-grid { margin-top: var(--space-7); }
 .field { display: grid; align-content: start; min-width: 0; gap: var(--space-3); }
 .field.full { grid-column: 1 / -1; }
@@ -1008,32 +1127,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .check-row { display: flex; min-height: var(--control-lg); align-items: center; gap: var(--space-5); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-6); color: var(--fg); font-size: var(--text-sm); transition: background var(--motion-fast); }
 .check-row:hover { background: var(--surface-warm); }
 .check-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
-/* The ways a capability can be turned on, each carrying its own cost: the choice
-   says what it does and what it costs, so nothing above the list has to explain
-   the lot of them in a paragraph of its own. A filled row, like every control —
-   the whole row is the button. */
-.option-list { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-5); }
-.option { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); text-align: start; transition: background var(--motion-fast); }
-.option:hover { background: var(--surface-warm); }
-.option-name { color: var(--fg); font-size: var(--text-sm); font-weight: 550; }
-.option-note { color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
-.option.danger .option-name { color: var(--danger); }
-/* A setting that is not settled yet, said on the setting itself: a filled pill, the
-   same shape the sidebar's count wears, because it is a word about the row and not
-   something to press. */
 .experimental-tag { flex: none; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px var(--space-4); color: var(--muted); font-size: var(--text-2xs); font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
-/* A setting said as one line and a switch, with air above it so it does not read as a
-   continuation of the grid it follows. The switch is a control like any other here:
-   filled, never outlined — the track carries the state, the knob sits on it. */
-.toggle-row { display: flex; align-items: center; gap: var(--space-7); margin-top: var(--space-8); }
-.toggle-text { display: flex; min-width: 0; flex-direction: column; gap: var(--space-2); }
-.toggle-label { display: flex; align-items: center; gap: var(--space-4); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; }
-.toggle-text small { color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
-.switch { position: relative; flex: none; width: 44px; height: 26px; border: 0; border-radius: var(--radius-pill); background: var(--border); padding: 0; transition: background var(--motion-fast); }
-.switch:hover { background: var(--border-soft); }
+.switch { position: relative; flex: none; width: 40px; height: 24px; border: 0; border-radius: var(--radius-pill); background: var(--border); padding: 0; transition: background var(--motion-fast); }
+.switch:hover { background: color-mix(in oklab, var(--fg) 22%, var(--border)); }
 .switch.is-on { background: var(--accent); }
-.switch-knob { position: absolute; inset-block-start: 3px; inset-inline-start: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--knob); box-shadow: var(--shadow-sm); transition: transform var(--motion-fast) var(--ease-standard); }
-.switch.is-on .switch-knob { transform: translateX(18px); }
+.switch.is-on:hover { background: var(--accent-hover); }
+.switch-knob { position: absolute; inset-block-start: 3px; inset-inline-start: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--knob); box-shadow: var(--shadow-sm); transition: transform var(--motion-fast) var(--ease-standard); }
+.switch.is-on .switch-knob { transform: translateX(16px); }
 .section-label { padding: var(--space-7) 0 var(--space-3); color: var(--muted); font-size: var(--text-2xs); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 .secret-row { display: flex; align-items: center; gap: var(--space-6); padding: var(--space-5) var(--space-6); border-radius: var(--radius-md); transition: background var(--motion-fast); }
 .secret-row:hover, .entry-row:hover { background: var(--surface-warm); }
@@ -1044,38 +1144,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .secret-state { color: var(--muted); font: var(--text-2xs) var(--font-mono); }
 .secret-row .secret-state { flex: none; }
 /* Which model answers, on a screen with room for it: the providers as a rail and
-   the models of the one being looked at beside them. The rail only moves the eye —
-   the choice is a model, which is what fixes the pair — so the row that is set
-   stays marked wherever the browsing goes. */
+   the models of the one being looked at beside them. */
 .model-picker { display: none; }
-/* `min-height: 0` is what lets a pane be shorter than its list: a grid row is at
-   least as tall as its content, so without it a long list grows the row past the
-   height the picker is holding instead of scrolling inside it. */
 .model-picker-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-5); }
-.model-picker-pane h3 { padding: var(--space-1) var(--space-5); color: var(--muted); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.model-picker-search { display: flex; flex: none; align-items: center; gap: var(--space-4); border-radius: var(--radius-sm); background: var(--bg); padding: 0 var(--space-3) 0 var(--space-5); color: var(--muted); transition: box-shadow var(--motion-fast); }
-.mobile-model-sheet .model-picker-search { background: var(--surface); }
-.model-picker-search:focus-within { box-shadow: var(--focus-ring); }
+.model-picker-pane h3 { padding: var(--space-1) var(--space-4); color: var(--muted); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.model-picker-search { display: flex; flex: none; align-items: center; gap: var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg); padding: 0 var(--space-3) 0 var(--space-5); color: var(--muted); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+.mobile-model-sheet .model-picker-search { background: var(--surface); border: 0; }
+.model-picker-search:focus-within { border-color: var(--border); box-shadow: var(--focus-ring); }
 .model-picker-search svg.icon { flex: none; }
 .model-picker-search input { width: 100%; min-height: var(--control-md); border: 0; background: none; padding: var(--space-3) 0; color: var(--fg); font-size: var(--text-xs); }
 .model-picker-search input::placeholder { color: var(--muted); }
 .model-picker-search input:focus { outline: 0; }
-/* The lists scroll inside a height the panes hold between them, so switching
-   provider does not make the section jump as the model list changes length. */
 .model-picker-list { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: var(--space-1); overflow: auto; }
-.model-picker-row { display: flex; flex: none; min-height: var(--control-md); align-items: center; gap: var(--space-4); width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-sm); text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.model-picker-row { display: flex; flex: none; min-height: var(--control-md); align-items: center; gap: var(--space-4); width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: var(--space-2) var(--space-4); color: var(--fg-2); font-size: var(--text-sm); text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
 .model-picker-row:hover { background: var(--surface-warm); color: var(--fg); }
-.model-picker-row.browsing { background: var(--surface-warm); color: var(--fg); font-weight: 550; }
+.model-picker-row.browsing { background: var(--surface-raised); color: var(--fg); font-weight: 600; box-shadow: var(--shadow-sm); }
 .model-picker-row.chosen { color: var(--fg); font-weight: 550; }
 .model-picker-pane:last-child .model-picker-row.chosen { background: var(--accent-wash); }
 .model-picker-row > svg.icon { flex: none; color: var(--accent); }
-/* A provider's own mark keeps the row's ink: the accent is the pointer, not the paint. */
 .model-picker-row > svg.provider-mark, .mobile-model-chip > svg.provider-mark { flex: none; color: inherit; }
-/* The id takes the row, and what belongs to the model — its modalities, window
-   and the mark that says it is the one set — lines up at the trailing edge. */
 .model-picker-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A measure that belongs to the name beside it — how much a model holds. Shared
-   by every list that shows one, so the badge cannot drift between them. */
 .size-badge { flex: none; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--fg) 7%, transparent); padding: 2px var(--space-3); color: var(--muted); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .model-details { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); }
 .composer-model-wrap .select-trigger .model-details { display: none; }
@@ -1084,12 +1172,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .model-modality { display: inline-flex; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--muted); }
 .model-modality svg.icon { color: currentColor; }
 .model-picker-note { padding: var(--space-5); color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
-/* The composer's split popover: recessed provider rail on the left, seamless
-   search + model list on the right. */
 .composer-model-panes { display: grid; flex: 1 1 auto; grid-template-columns: minmax(156px, 180px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; min-height: 0; }
 .composer-model-panes .model-picker-pane:first-child { border-radius: 0; border-inline-end: 1px solid var(--border-soft); background: var(--surface); padding: var(--space-4) var(--space-3); gap: var(--space-1); }
 .composer-model-panes .model-picker-pane:last-child { border-radius: 0; background: transparent; padding: 0; gap: 0; }
-.composer-model-panes .model-picker-search { border-radius: 0; border-bottom: 1px solid var(--border-soft); background: transparent; padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5); }
+.composer-model-panes .model-picker-search { border: 0; border-radius: 0; border-bottom: 1px solid var(--border-soft); background: transparent; padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5); }
 .composer-model-panes .model-picker-search:focus-within { box-shadow: none; }
 .composer-model-panes .model-picker-search input { min-height: var(--control-md); font-size: var(--text-sm); }
 .composer-model-panes .model-picker-pane:last-child .model-picker-list { padding: var(--space-3); gap: var(--space-1); }
@@ -1100,35 +1186,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-model-panes .model-picker-pane:last-child .model-picker-row:hover { background: var(--surface); }
 .composer-model-panes .model-picker-pane:last-child .model-picker-row.chosen { background: var(--accent-wash); color: var(--fg); font-weight: 550; }
 @media (min-width: 901px) {
-  /* Tall enough to read a catalog in, sized to the screen rather than to a number
-     I picked, and short enough that the section still fits beside the panel head,
-     the API URL and the save bar: past that the page starts scrolling for the
-     panes, which is the one thing they were meant to stop doing. */
-  .model-picker { display: grid; grid-template-columns: minmax(170px, 220px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--space-7); height: clamp(320px, 52vh, 620px); margin-bottom: var(--space-7); }
+  .model-picker { display: grid; grid-template-columns: 196px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--space-5); height: clamp(272px, 42vh, 420px); }
 }
-.secret-groups { display: grid; gap: var(--space-9); }
-.secret-group { min-width: 0; }
-.secret-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-4); }
-.secret-group-head h3 { color: var(--fg-2); font-size: var(--text-sm); font-weight: 600; }
-.secret-group-count { color: var(--muted); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
-.secret-list { display: grid; gap: var(--space-3); }
-.secret-group .secret-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-4) var(--space-7); min-height: 60px; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); }
-.secret-group .secret-row:hover, .secret-group .secret-row.editing { background: var(--surface-warm); }
-.secret-identity { display: flex; min-width: 0; align-items: baseline; gap: var(--space-6); }
-.secret-identity > svg.provider-mark { flex: none; align-self: center; color: inherit; }
-.secret-identity .secret-name { overflow: hidden; min-width: 0; color: var(--fg); font-size: var(--text-sm); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.secret-identity .secret-state { flex: none; color: var(--muted); font: var(--text-xs) var(--font-mono); white-space: nowrap; }
-.secret-identity .secret-state.configured { color: var(--success); }
-.secret-row-actions { display: flex; align-items: center; gap: var(--space-3); }
-.secret-group .secret-row button.button { min-height: var(--control-md); padding-inline: var(--space-6); }
-.secret-editor { display: grid; grid-column: 1 / -1; gap: var(--space-3); padding: var(--space-1) 0 var(--space-2); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
-.secret-group .secret-editor input { width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-sm); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--fg); font-size: var(--text-sm); }
-.secret-group .secret-editor input:focus { outline: 0; box-shadow: var(--focus-ring); }
 .settings-section .list-empty { padding: var(--space-8); color: var(--muted); font-size: var(--text-sm); text-align: center; }
-/* Only there when something is unsaved, and solid: a floating bar that blurs the
-   content under it reads as a glitch, and one that is always up says nothing. */
-.settings-save { position: sticky; z-index: 4; bottom: var(--space-7); display: flex; align-items: center; justify-content: flex-end; gap: var(--space-6); max-width: 1180px; margin: var(--space-8) 0 var(--space-7); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: var(--shadow-menu); padding: var(--space-5) var(--space-6); animation: fade-in var(--motion-base) var(--ease-standard); }
-.save-actions { display: flex; gap: var(--space-5); }
+/* Floating save bar: only visible when the current section has unsaved edits. */
+.settings-save { position: sticky; z-index: 4; bottom: var(--space-7); display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); max-width: 680px; margin: var(--space-7) 0 var(--space-7); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: var(--shadow-menu); padding: var(--space-4) var(--space-6); animation: fade-in var(--motion-base) var(--ease-standard); }
+.settings-save-status { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
+.save-actions { display: flex; gap: var(--space-3); }
 .button { display: inline-flex; flex: none; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-7); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .list-empty .button { margin-top: var(--space-5); }
 .button:hover { background: var(--border-soft); }
@@ -1441,16 +1505,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      carry their own way back, and they sit under the same status bar the topbar's
      pills do, so they keep the same step of air under it (see the topbar above). */
   .settings-layout .settings-inner { padding: var(--phone-top) 20px 0; }
-  .settings-index { position: static; width: auto; padding: var(--phone-top) 20px var(--space-9); border-inline-end: 0; }
-  .settings-index-row { min-height: 56px; }
-  /* Qualified with the icon class like the rule it overrides: the bare `svg` was one
-     class lighter, so the desktop `display: none` kept winning and the arrow never
-     reached the phone. */
-  .settings-index-row > svg.icon:last-child { display: block; }
+  .settings-index { position: static; width: auto; padding: var(--phone-top) 20px var(--space-9); }
+  .settings-index-list { overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); gap: 0; }
+  .settings-index-row { min-height: 52px; border-radius: 0; padding: var(--space-4) var(--space-6); }
+  .settings-index-row + .settings-index-row { border-top: 1px solid var(--border-soft); }
+  .settings-index-row > svg.settings-index-chevron { display: block; }
   .settings-index-label { font-size: var(--text-md); }
-  .settings-index-summary { font-size: var(--text-xs); }
-  /* The head says which section this is; the description is what is left to add. */
-  .settings-section .panel-head h2 { display: none; }
+  /* The mobile header already shows the section title; keep the description below it. */
+  .settings-section-head h2, .settings-section .panel-head h2 { display: none; }
+  .settings-section-head { padding-bottom: var(--space-6); }
+  .settings-section-head p { margin-top: 0; }
   .settings-save { bottom: max(12px, env(safe-area-inset-bottom)); }
   /* The drawer's controls, up from the sidebar's own small step: at the sidebar's
      width on a phone that step reads too fine. Kept at the 15px the Settings screen
@@ -1470,6 +1534,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 16px 0; }
   .settings-layout .settings-inner { padding-inline: 16px; }
   .settings-index { padding-inline: 16px; }
+  .settings-row { flex-wrap: wrap; gap: var(--space-4); padding: var(--space-5); }
+  .settings-row:has(.settings-segmented) { flex-direction: column; align-items: stretch; }
+  .settings-row:has(.settings-segmented) .settings-row-control { width: 100%; }
+  .settings-row:has(.settings-segmented) .settings-segmented { width: 100%; }
+  .settings-row:has(.settings-segmented) .settings-segmented-item { flex: 1; }
+  .settings-row-control { max-width: 100%; }
+  .settings-key-main { flex-wrap: wrap; gap: var(--space-4); }
+  .settings-key-identity { flex-wrap: wrap; gap: var(--space-3); }
+  .settings-input-action { flex-wrap: wrap; }
+  .settings-effort-wrap { width: 100%; }
+  .settings-select-wrap { min-width: 150px; }
+  .settings-save { flex-wrap: wrap; }
   .form-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   /* One step between the blocks a phone stacks, so a section reads as groups rather
@@ -2243,9 +2319,9 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 .message.user .message-prose strong,
 .message.user .message-prose blockquote { color: var(--palette-user-bubble-text, #FFE8D3); }
 
-.palette-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: var(--space-4); }
-.palette-option { display: flex; align-items: center; gap: var(--space-4); min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-5); color: var(--fg); font-size: var(--text-xs); font-weight: 500; text-align: left; transition: background var(--motion-fast), color var(--motion-fast); }
-.palette-option:hover:not(:disabled) { background: var(--border-soft); }
+.palette-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--space-3); }
+.palette-option { display: flex; align-items: center; gap: var(--space-3); min-height: var(--control-md); border: 0; border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-3) var(--space-4); color: var(--fg); font-size: var(--text-xs); font-weight: 500; text-align: left; transition: background var(--motion-fast), color var(--motion-fast); }
+.palette-option:hover:not(:disabled) { background: var(--surface-warm); }
 .palette-option.active { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
 .palette-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

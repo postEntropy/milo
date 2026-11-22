@@ -1,10 +1,21 @@
 /** The sections of Settings: the id its address carries, its icon, and its name. */
 export const settingsSections = [
-  ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
-  ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
-  ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'palette', 'Appearance'],
-  ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
+  ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['display', 'palette', 'Appearance'],
+  ['tools', 'settings', 'Tools'], ['skills', 'spark', 'Skills'], ['memory', 'database', 'Memory'], ['permissions', 'shield', 'Permissions'],
+  ['sessions', 'history', 'Sessions'], ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
 ] as const
+
+export type SettingsSectionId = (typeof settingsSections)[number][0]
+
+/** Visual grouping for the Settings navigation rail and mobile index. */
+export const settingsSectionGroups: ReadonlyArray<{
+  label: string
+  ids: ReadonlyArray<SettingsSectionId>
+}> = [
+  { label: 'General', ids: ['provider', 'keys', 'display'] },
+  { label: 'Agent', ids: ['tools', 'skills', 'memory', 'permissions'] },
+  { label: 'System', ids: ['sessions', 'gateways', 'web'] },
+]
 
 /** The section a settings path names, e.g. `/settings/display`; null for a plain `/settings`. */
 export function settingsSectionFromPath(pathname: string): string | null {

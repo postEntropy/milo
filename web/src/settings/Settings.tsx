@@ -6,7 +6,6 @@ import { CLASSIFIER_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel }
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import type { SessionBackendSummary } from '../../../src/core/sessions/types.js'
 import { humanSize } from '../../../src/util/format.ts'
-import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { Select } from '../ui/Select.js'
@@ -14,9 +13,10 @@ import { ReasoningSlider } from '../ui/ReasoningSlider.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
 import { ProviderMark } from '../ui/ProviderMark.js'
 import { usePhone } from '../lib/phone.js'
-import { settingsSections } from './sections.js'
+import { settingsSectionGroups, settingsSections } from './sections.js'
 import { MobileModelSheet } from './MobileModelPicker.js'
 import { DisplayPreview } from './DisplayPreview.js'
+import { Disclosure, Segmented, SettingRow, SettingsGroup, SettingStack, Switch } from './Controls.js'
 import { MiloMark } from '../ui/MiloMark.js'
 import {
   COLOR_PALETTES,
@@ -27,6 +27,7 @@ import {
 import { CLASSIFIER_BACKENDS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS, type ThinkingDisplay } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 import { chatGptPlanName } from '../../../src/core/chatgpt/plan.ts'
+import { computerSetupHelp, type ComputerStatusWithHelp } from '../../../src/core/computer/setup-help.ts'
 
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; oauth?: 'chatgpt'; models: string[]; keyURL?: string }
 type ChatGptStatus = { signedIn: boolean; email?: string; planType?: string; planName?: string; expiresAt?: number; codexLogin?: boolean }
@@ -57,29 +58,16 @@ type MemoryStats = { backend: string; location: string; scopes: number; facts: n
 type Note = { id: string; text: string; createdAt: number; source?: { session: string; quote: string } }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
-type ComputerStatus = {
-  available: boolean
-  platform: string
-  sdkVersion: string | null
-  displayServer: string
-  waylandEnabled: boolean
-  atspiAvailable: boolean
-  screenCaptureAvailable: boolean
-  inputModes: { accessibility: boolean; windowScopedPointer: boolean; xsendEvent: boolean; hyprlandPlugin: boolean }
-  limitations: string[]
-  reason?: string
-  summary: string
+type ComputerStatus = Omit<ComputerStatusWithHelp, 'setupHelp'> & {
+  setupHelp?: ComputerStatusWithHelp['setupHelp']
 }
-/** The access level a grant was made at, as the server names and describes it. */
 type GoogleTier = { id: 'none' | 'modify' | 'compose' | 'send'; label: string; description: string }
-/** The three states the server reports for the grant, with the tools it buys and the levels on offer. */
 type GoogleReport = (
   | { kind: 'off' }
   | { kind: 'wanted' }
   | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean; access: GoogleTier['id'] }
 ) & { tools: string[]; writeTools: string[]; tiers: GoogleTier[] }
 
-/** The tier a level names, from the list the server sends, so the screen never guesses a label. */
 function tierOf(tiers: GoogleTier[], id: GoogleTier['id']): GoogleTier | undefined {
   return tiers.find((tier) => tier.id === id)
 }
@@ -94,11 +82,6 @@ function restartReasonsFor(keys: ReadonlyArray<keyof SettingsConfig>, draft: Set
   return reasons
 }
 
-/**
- * The config keys each section edits, so a section can be saved, kept and put back on
- * its own: one section's edits never ride along with another's. API keys are not in the
- * config at all — they are stored one by one, and `secrets` holds the ones not kept yet.
- */
 const SECTION_KEYS: Record<string, ReadonlyArray<keyof SettingsConfig>> = {
   provider: ['provider', 'model', 'providers', 'media', 'reasoningEffort', 'maxTokens'],
   memory: ['memory'],
@@ -110,12 +93,10 @@ const SECTION_KEYS: Record<string, ReadonlyArray<keyof SettingsConfig>> = {
   sessions: ['sessions'],
 }
 
-/** Which of these keys differ between the draft and what is saved. */
 function changedKeys(draft: SettingsConfig, saved: SettingsConfig, keys: ReadonlyArray<keyof SettingsConfig>): Array<keyof SettingsConfig> {
   return keys.filter((key) => JSON.stringify(draft[key]) !== JSON.stringify(saved[key]))
 }
 
-/** `target` with each of these keys taken from `source`, and removed where `source` has none. */
 function withKeys(target: SettingsConfig, source: SettingsConfig, keys: ReadonlyArray<keyof SettingsConfig>): SettingsConfig {
   const next = structuredClone(target) as unknown as Record<string, unknown>
   for (const key of keys) {
@@ -139,7 +120,6 @@ type SettingsData = {
   google: GoogleReport
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
-/** A server Milo may call tools on, as the screen reports it. The shape is the core's own. */
 type McpServer = {
   name: string
   command: string
@@ -153,26 +133,24 @@ type McpServer = {
 }
 type McpReport = { file: string; error?: string; servers: McpServer[] }
 
-/** What a server is doing, in one line: the count, and where it came from. */
 function describeMcpServer(server: McpServer): string {
-  if (!server.enabled) return 'Off — its tools are out of the catalog.'
+  if (!server.enabled) return 'Off — tools excluded from catalog.'
   const tools = `${server.tools} tool${server.tools === 1 ? '' : 's'}`
-  const listed = server.listingAt ? ` · last listed ${formatWhen(server.listingAt)}` : ''
+  const listed = server.listingAt ? ` · listed ${formatWhen(server.listingAt)}` : ''
   if (server.state === 'ready') return `Connected · ${tools}`
   if (server.state === 'connecting') return `Connecting… · ${tools} so far`
-  if (server.state === 'failed') return `Not running · ${tools} from the last listing`
-  return server.listingAt ? `${tools} from the last listing${listed}` : 'Not connected yet — Check connects it now.'
+  if (server.state === 'failed') return `Not running · ${tools} from last listing`
+  return server.listingAt ? `${tools}${listed}` : 'Not connected yet — run Check to connect.'
 }
 
-/** The display levels as a person reads them; the stored value stays the short form. */
-const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
+const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full', name: 'Name', off: 'Hidden' }
 const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { expanded: 'Expanded', collapsed: 'Collapsed' }
+const PERMISSION_DESCRIPTIONS: Record<'ask' | 'auto' | 'yolo', string> = {
+  ask: 'Confirms every tool call that can cause an effect.',
+  auto: 'A reviewing model approves safe calls and asks for risky ones.',
+  yolo: 'Runs every tool without asking.',
+}
 
-/**
- * The ChatGPT grant, as the provider screen draws it. A subscription is a
- * sign-in, not a key: the panel offers the browser and one-time-code flows, and
- * polls while the server waits for the callback.
- */
 function ChatGptAccount({ status, onChanged }: { status?: ChatGptStatus; onChanged: () => Promise<void> }) {
   const [pending, setPending] = useState<{ url: string; userCode?: string; device?: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -230,43 +208,47 @@ function ChatGptAccount({ status, onChanged }: { status?: ChatGptStatus; onChang
   if (status?.signedIn) {
     const plan = status.planName ?? chatGptPlanName(status.planType) ?? ''
     return (
-      <div>
-        <p className="panel-note">
-          Signed in to ChatGPT as {status.email ?? 'this account'}
-          {plan ? ` (${plan})` : ''}. The Codex subscription is used through this grant.
-        </p>
-        <button className="button" type="button" onClick={() => void signOut()} disabled={busy}>Sign out</button>
-        {error && <p className="panel-note">{error}</p>}
-      </div>
+      <SettingsGroup title="ChatGPT account">
+        <SettingRow
+          label={status.email ?? 'Signed in'}
+          description={plan ? `${plan} · Codex subscription active.` : 'Codex subscription active.'}
+        >
+          <button className="button settings-btn-sm" type="button" onClick={() => void signOut()} disabled={busy}>Sign out</button>
+        </SettingRow>
+        {error && <div className="settings-row"><p className="settings-row-desc settings-error-text">{error}</p></div>}
+      </SettingsGroup>
     )
   }
 
   return (
-    <div>
-      <p className="panel-note">
-        ChatGPT (Codex) uses a ChatGPT subscription, not an API key. A Codex login on this machine is imported first.
-      </p>
-      <div>
-        <button className="button" type="button" onClick={() => void start(false)} disabled={busy}>Sign in with ChatGPT</button>
-        <button className="button" type="button" onClick={() => void start(true)} disabled={busy}>Use a one-time code</button>
-      </div>
+    <SettingsGroup title="ChatGPT account">
+      <SettingRow
+        label="Connect subscription"
+        description="Uses a ChatGPT subscription instead of an API key. A local Codex login is imported first."
+      >
+        <div className="settings-inline-actions">
+          <button className="button primary settings-btn-sm" type="button" onClick={() => void start(false)} disabled={busy}>Sign in</button>
+          <button className="button settings-btn-sm" type="button" onClick={() => void start(true)} disabled={busy}>One-time code</button>
+        </div>
+      </SettingRow>
       {pending && (
-        <p className="panel-note">
-          {pending.userCode ? (
-            <>Open <a href={pending.url} target="_blank" rel="noreferrer">{pending.url}</a> and enter <strong>{pending.userCode}</strong>. </>
-          ) : (
-            <>Finish signing in in the tab that opened, or <a href={pending.url} target="_blank" rel="noreferrer">open it again</a>. </>
-          )}
-          Waiting for the sign-in to finish…
-        </p>
+        <div className="settings-row">
+          <p className="settings-row-desc">
+            {pending.userCode ? (
+              <>Open <a className="settings-link" href={pending.url} target="_blank" rel="noreferrer">{pending.url}</a> and enter <strong>{pending.userCode}</strong>. </>
+            ) : (
+              <>Finish signing in in the tab that opened, or <a className="settings-link" href={pending.url} target="_blank" rel="noreferrer">open it again</a>. </>
+            )}
+            Waiting for sign-in…
+          </p>
+        </div>
       )}
-      {error && <p className="panel-note">{error}</p>}
-    </div>
+      {error && <div className="settings-row"><p className="settings-row-desc settings-error-text">{error}</p></div>}
+    </SettingsGroup>
   )
 }
 
-export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, onOpenSession, theme, onThemeChange, palette = DEFAULT_COLOR_PALETTE, paletteSync = false, onPaletteChange, onPaletteSyncChange, onPaletteStateLoaded, onDirtyChange }: {
-  /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
+export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, onOpenSession, onStartSession, theme, onThemeChange, palette = DEFAULT_COLOR_PALETTE, paletteSync = false, onPaletteChange, onPaletteSyncChange, onPaletteStateLoaded, onDirtyChange }: {
   section: string | null
   onSection(section: string | null): void
   chatId: string
@@ -274,6 +256,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   onClose(): void
   onSessionChange(id: string): void
   onOpenSession(id: string): void
+  onStartSession?(firstMessage: string): Promise<{ ok: true } | { ok: false; error?: string }>
   theme: string
   onThemeChange(theme: string): void
   palette?: ColorPaletteId
@@ -281,7 +264,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   onPaletteChange?(palette: ColorPaletteId): Promise<void> | void
   onPaletteSyncChange?(sync: boolean): Promise<void> | void
   onPaletteStateLoaded?(state: PaletteState): void
-  /** Told when the draft holds edits, so leaving can ask before dropping them. */
   onDirtyChange?(dirty: boolean): void
 }) {
   const [data, setData] = useState<SettingsData | null>(null)
@@ -296,7 +278,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
-  /** The provider whose models the picker is showing; null means the draft's own. */
   const [browsing, setBrowsing] = useState<string | null>(null)
   const [editingSecret, setEditingSecret] = useState<string | null>(null)
   const noteRequest = useRef(0)
@@ -310,6 +291,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
   const [modelSheetOpen, setModelSheetOpen] = useState(false)
+  const [startingHelp, setStartingHelp] = useState(false)
   const phone = usePhone()
   const current = section ?? (phone ? null : 'provider')
 
@@ -378,9 +360,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   }, [noteQuery, noteOffset])
 
   useEffect(() => { if (current === 'memory') void refreshNotes() }, [current, refreshNotes])
-
-  // The report rides along with the overview, and a toggle answers with the new
-  // one — so this only seeds the screen, it never asks a server anything.
   useEffect(() => { if (data) setMcp(data.mcp) }, [data])
 
   const reloadMcp = useCallback(async (): Promise<void> => {
@@ -400,16 +379,10 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const currentProvider = draft?.provider ?? ''
   const browsedProvider = browsing ?? currentProvider
 
-  /**
-   * The ChatGPT status alone, so a sign-in refreshes the panel without replacing
-   * the draft — switching to ChatGPT is unsaved work until Save is pressed.
-   */
   const refreshChatGpt = useCallback(async (): Promise<void> => {
     try {
       const status = await api<ChatGptStatus>('chatgpt-status')
       setData((current) => current ? { ...current, chatgpt: status } : current)
-      // The list was read while the provider was only being browsed; a sign-in
-      // is what makes the ChatGPT catalog answer, so read it again.
       if (status.signedIn && browsedProvider) {
         setCatalog(null)
         setCatalog(await api<ModelInfo[]>('models', { provider: browsedProvider }).catch(() => []))
@@ -417,8 +390,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     } catch { /* the sign-in panel keeps its last answer */ }
   }, [browsedProvider])
 
-  // What the provider itself reports, through the same call the composer's model
-  // menu makes, so the two pickers cannot offer different models.
   useEffect(() => {
     if (current !== 'provider' || !browsedProvider) return
     let live = true
@@ -429,24 +400,16 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     return () => { live = false }
   }, [current, browsedProvider])
 
-
   const saved = data?.config
-  // What the running process cannot take on now, named one by one so the notice
-  // says which setting is asking for the restart. The model is deliberately
-  // absent: saving one moves the running model as well, so it needs none.
   const restartReasons: string[] = !draft || !saved ? [] : [
     ...(JSON.stringify(draft.browser) !== JSON.stringify(saved.browser) ? ['Browser'] : []),
+    ...(JSON.stringify(draft.computer) !== JSON.stringify(saved.computer) ? ['Computer Use'] : []),
     ...(JSON.stringify(draft.web) !== JSON.stringify(saved.web) ? ['Web host and port'] : []),
-    // The reviewer is built once at startup, so which decision model it asks is
-    // read on the next run, like the browser and the web host.
     ...(JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier) ? ['Reviewer model'] : []),
-    // The Google tools are registered when the runtime starts, so switching them
-    // on here is read on the next run too.
     ...(JSON.stringify(draft.google) !== JSON.stringify(saved.google) ? ['Google tools'] : []),
   ]
   const requiresRestart = restartReasons.length > 0
 
-  /** Whether a given section has unsaved edits in the draft. */
   const isSectionDirty = useCallback((id: string | null): boolean => {
     if (!id || !saved || !draft) return false
     if (id === 'keys') return Object.keys(secrets).length > 0
@@ -460,7 +423,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
 
   useEffect(() => { onDirtyChange?.(anyDirty) }, [anyDirty, onDirtyChange])
 
-  /** Discards unsaved edits in the currently viewed section. */
   function discardCurrent(): void {
     if (!saved || !current) return
     if (current === 'keys') {
@@ -474,7 +436,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     if (current === 'provider') setBrowsing(null)
   }
 
-  /** Saves only the currently viewed section. */
   async function saveCurrent(): Promise<void> {
     if (!draft || !saved || !current) return
     setSaving(true)
@@ -506,11 +467,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     finally { setSaving(false) }
   }
 
-  /**
-   * Switching the provider carries its own details across — the endpoint it talks
-   * to and the key it expects — and lands on the first model it knows, since the
-   * one from the previous provider would be meaningless here.
-   */
   function switchProvider(next: string): void {
     const item = data?.presets.find((entry) => entry.id === next)
     setBrowsing(null)
@@ -530,10 +486,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     }
   }
 
-  /**
-   * Picking a model fixes the pair: browsing another provider and choosing a model
-   * from it moves the provider too, in the same act.
-   */
   function pickModel(next: string): void {
     if (browsing && browsing !== currentProvider) switchProvider(browsing)
     update(['model'], next)
@@ -554,8 +506,6 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     })
   }
 
-
-  /** Writes the config straight away, for a control that acts rather than edits. */
   async function saveNow(patch: (config: SettingsConfig) => void, note: string): Promise<void> {
     if (!draft) return
     setSaving(true)
@@ -628,16 +578,17 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const notices = <>
     <Notice notice={notice} onDismiss={() => setNotice(null)} />
     {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
-    {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
+    {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to apply: {restartReasons.join(', ')}.</p>}
   </>
 
+  const embeddingMode = draft?.memory.embedding?.provider ?? 'off'
+
   return <div className="settings-workspace">
-    {busy && <div className="settings-inner"><p role="status">Reading Milo’s settings…</p></div>}
-    {!busy && !data && <div className="settings-inner"><div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div></div>}
+    {busy && <div className="settings-inner"><p className="settings-loading" role="status">Reading Milo’s settings…</p></div>}
+    {!busy && !data && <div className="settings-inner"><div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button settings-btn-sm" type="button" onClick={() => void load()}>Try again</button></div></div>}
     {data && draft && <div className="settings-layout">
       {(!phone || current === null) && <SettingsIndex
         current={current}
-        summary={(id) => summarize(id, draft, data, theme)}
         isDirty={isSectionDirty}
         onSelect={onSection}
         onBack={onClose}
@@ -649,515 +600,1202 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
         </header>}
         {!phone && notices}
         <div className="settings-panel-stack">
-        <Section title="Provider & model" description="Choose the service that produces the replies." active={current === 'provider'}>
-          {phone ? (
-            <>
-              <div className="mobile-model-card">
-                <div className="mobile-model-card-info">
-                  <span className="mobile-model-card-label">
-                    {draft.model === data.config.model && draft.provider === data.config.provider ? 'Active model' : 'Selected model (unsaved)'}
-                  </span>
-                  <span className="mobile-model-card-name">{draft.model}</span>
-                  <span className="mobile-model-card-provider">
-                    {data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => {
-                    setBrowsing(draft.provider)
-                    setModelSheetOpen(true)
-                  }}
-                >
-                  Change
-                </button>
-              </div>
-              {modelSheetOpen && (
-                <MobileModelSheet
-                  presets={data.presets}
-                  provider={draft.provider}
-                  model={draft.model}
-                  browsing={browsedProvider}
-                  catalog={catalog}
-                  onBrowse={setBrowsing}
-                  onPick={pickModel}
-                  onClose={() => setModelSheetOpen(false)}
-                />
-              )}
-            </>
-          ) : (
-            <ModelPicker
-              presets={data.presets}
-              provider={draft.provider}
-              model={draft.model}
-              browsing={browsedProvider}
-              catalog={catalog}
-              onBrowse={setBrowsing}
-              onPick={pickModel}
-            />
-          )}
-          {(draft.provider === 'chatgpt' || browsedProvider === 'chatgpt') && (
-            <ChatGptAccount status={data.chatgpt} onChanged={refreshChatGpt} />
-          )}
-          <div className="form-grid">
-            <Field label="Reasoning effort"><ReasoningSlider value={draft.reasoningEffort} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
-          </div>
-          <Advanced>
-            <div className="form-grid model-url">
-            <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
-            </div>
-            <div className="form-grid">
-            <Field label="Vision model"><input value={draft.media?.vision ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'vision'], event.target.value || undefined)} /><small>Milo checks model metadata for image input support. Set a model here if its provider does not report that.</small></Field>
-            <Field label="Audio transcription model"><input value={draft.media?.audio ?? 'whisper-large-v3-turbo'} onChange={(event) => update(['media', 'audio'], event.target.value)} /><small>Groq Whisper. Add a Groq API key under API keys.</small></Field>
-            <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>
-            <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /><small>Most tokens one reply may use. Empty, the provider’s own limit applies.</small></Field>
-            </div>
-          </Advanced>
-        </Section>
-        <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={current === 'keys'}>
-          <div className="secret-groups">
-            {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
-              const ids = group === 'providers' ? [...new Set([...data.presets.filter((item) => !item.oauth && item.id !== 'chatgpt').map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq' && id !== 'chatgpt' && !data.presets.some((item) => item.id === id && item.oauth)) : group === 'audio' ? ['groq'] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
-              const label = group === 'providers' ? 'Providers' : group === 'audio' ? 'Audio' : group === 'search' ? 'Web search' : 'Gateways'
-              const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
-              const configured = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
-              return <section className="secret-group" key={group} aria-labelledby={`keys-${group}`}>
-                <header className="secret-group-head">
-                  <h3 id={`keys-${group}`}>{label}</h3>
-                  <span className="secret-group-count">{configured} of {ids.length} configured</span>
-                </header>
-                <div className="secret-list">
-                  {orderedIds.map((id) => {
-                    const configured = Boolean(data.auth[group]?.[id]?.set)
-                    const slot = `${group}:${id}`
-                    const editing = editingSecret === slot
-                    const serviceName = group === 'providers'
-                      ? data.presets.find((preset) => preset.id === id)?.name ?? id
-                      : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
-                    return <div className={`secret-row${editing ? ' editing' : ''}`} key={slot}>
-                      <div className="secret-identity">
-                        {group === 'providers' && <ProviderMark id={id} size={16} />}
-                        <span className="secret-name">{serviceName}</span>
-                        <span className={`secret-state ${configured ? 'configured' : ''}`}>{configured ? data.auth[group]?.[id]?.masked : 'Not set'}</span>
-                      </div>
-                      <div className="secret-row-actions">
-                        <button className="button" type="button" aria-expanded={editing} onClick={() => {
-                          if (editing) setSecrets((current) => { const next = { ...current }; delete next[slot]; return next })
-                          setEditingSecret(editing ? null : slot)
-                        }}>{editing ? 'Cancel' : configured ? 'Replace' : 'Add key'}</button>
-                        {configured && <button className="button danger" type="button" onClick={async () => { await api('remove-secret', { group, id }); setSecrets((current) => { const next = { ...current }; delete next[slot]; return next }); setEditingSecret(null); await load() }}>Remove</button>}
-                      </div>
-                      {editing && <label className="secret-editor">
-                        <span>{configured ? 'Replace key' : 'API key'}</span>
-                        <input aria-label={`${configured ? 'Replace' : 'Add'} ${id} API key`} type="password" autoComplete="new-password" value={secrets[slot] ?? ''} onChange={(event) => setSecrets((current) => ({ ...current, [slot]: event.target.value }))} />
-                      </label>}
-                    </div>
-                  })}
-                </div>
-              </section>
-            })}
-          </div>
-        </Section>
-        <Section title="Memory" description="What Milo keeps between sessions, and how it looks it up later." active={current === 'memory'}>
-          <div className="form-grid">
-            <Field label="Recent messages kept"><input type="number" min="1" value={draft.memory.keepSaid ?? ''} onChange={(event) => update(['memory', 'keepSaid'], event.target.value ? Number(event.target.value) : undefined)} /><small>Leave empty to use Milo’s default.</small></Field>
-            <Field label="Notes used per reply"><input type="number" min="1" value={draft.memory.recallLimit ?? ''} onChange={(event) => update(['memory', 'recallLimit'], event.target.value ? Number(event.target.value) : undefined)} /><small>How many memories enter each question. Empty uses the default.</small></Field>
-          </div>
-          <label className="check-row"><input type="checkbox" checked={draft.memory.derive !== false} onChange={(event) => update(['memory', 'derive'], event.target.checked)} /> Save facts automatically at the end of each turn</label>
 
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Recall by meaning</h3>
-          <p className="panel-note">
-            {draft.memory.embedding
-              ? `On — ${draft.memory.embedding.provider === 'ollama' ? 'on this machine' : 'on OpenRouter'}${draft.memory.embedding.model ? ` (${draft.memory.embedding.model})` : ''}. Restart to apply.`
-              : 'Off.'}
-          </p>
-          <div className="option-list">
-            <button className="option" type="button" disabled={saving} onClick={() => void startJob('embed-provision')}>
-              <span className="option-name">Use this machine</span>
-              <span className="option-note">Downloads the engine (~1.9 GB) and a model, and runs them here. Nothing leaves this machine.</span>
-            </button>
-            <button className="option" type="button" disabled={saving} onClick={() => void saveNow((config) => { config.memory.embedding = { provider: 'openrouter' } }, 'Embeddings set to OpenRouter — it uses the OpenRouter key from API keys. Restart to apply.')}>
-              <span className="option-name">Use OpenRouter</span>
-              <span className="option-note">Uses the OpenRouter key from API keys. The notes leave this machine.</span>
-            </button>
-            <button className="option danger" type="button" disabled={saving || !draft.memory.embedding} onClick={() => void saveNow((config) => { delete config.memory.embedding }, 'Embeddings off. Restart to apply.')}>
-              <span className="option-name">Turn off</span>
-              <span className="option-note">Recall goes back to matching words only.</span>
-            </button>
-          </div>
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Notes</h3>
-          {data.memoryStats && <p className="panel-note">{data.memoryStats.facts} fact{data.memoryStats.facts === 1 ? '' : 's'} · {humanSize(data.memoryStats.bytes)} · {data.memoryStats.location}</p>}
-          <p className="panel-note">Editing or forgetting a note does not erase past messages, which may still be recalled.</p>
-          <Field label="Search notes"><input type="search" value={noteQuery} onChange={(event) => { setNoteQuery(event.target.value); setNoteOffset(0) }} /></Field>
-          {notes === null ? <p className="list-empty">Reading…</p>
-            : notes.length === 0 ? <p className="list-empty">{noteQuery ? 'No notes match your search.' : 'Nothing is remembered yet.'}</p>
-            : notes.map((note) => <div className="entry-row" key={note.id}><div>
-              {editingNote === note.id ? <><textarea aria-label="Note text" value={noteText} onChange={(event) => setNoteText(event.target.value)} /><div><button className="button" type="button" onClick={() => void saveNote(note.id)}>Save</button> <button className="button" type="button" onClick={() => setEditingNote(null)}>Cancel</button></div></> : <div className="secret-name">{note.text}</div>}
-              <div className="secret-state">Last said {formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div>
-              {note.source ? <div className="secret-state">Source: “{note.source.quote}” <button className="button" type="button" onClick={() => onOpenSession(note.source!.session)}>Open Session</button></div> : <div className="secret-state">Source unavailable</div>}
-            </div><div className="row-actions"><button className="button button-icon" type="button" title="Edit note" aria-label="Edit note" onClick={() => { setEditingNote(note.id); setNoteText(note.text) }}><Icon name="edit" size={16} /></button><button className="button button-icon" type="button" title="Forget note" aria-label="Forget note" onClick={() => void forgetNote(note.id)}><Icon name="trash" size={16} /></button></div></div>)}
-          {(noteOffset > 0 || notesMore) && <div><button className="button" type="button" disabled={noteOffset === 0} onClick={() => setNoteOffset(Math.max(0, noteOffset - 50))}>Previous</button> <button className="button" type="button" disabled={!notesMore} onClick={() => setNoteOffset(noteOffset + 50)}>Next</button></div>}
-        </Section>
-        <Section title="Gateways" description="Optional chat channels; tokens are stored locally." active={current === 'gateways'}>
-          {(['telegram', 'discord'] as const).map((gateway) => <div key={gateway}>
-            <label className="check-row"><input type="checkbox" checked={Boolean(draft.gateways[gateway]?.enabled)} onChange={(event) => update(['gateways', gateway], { enabled: event.target.checked, allowlist: draft.gateways[gateway]?.allowlist ?? [] })} /> Enable {gateway}</label>
-            <Field label={`${gateway} · allowed people`}><input value={(draft.gateways[gateway]?.allowlist ?? []).join(', ')} onChange={(event) => update(['gateways', gateway], { enabled: Boolean(draft.gateways[gateway]?.enabled), allowlist: splitNames(event.target.value) })} /><small>Leave empty to allow anyone who finds the bot.</small></Field>
-          </div>)}
-        </Section>
-        <Section title="Web" description="The browser chat: whether it is served, and where it listens." active={current === 'web'}>
-          <label className="check-row"><input type="checkbox" checked={draft.web.enabled} onChange={(event) => update(['web', 'enabled'], event.target.checked)} /> Serve it with <code className="mono">milo serve</code> (restart to apply)</label>
-          <div className="form-grid">
-            <Field label="Bind address"><input value={draft.web.host} onChange={(event) => update(['web', 'host'], event.target.value)} placeholder="127.0.0.1" /></Field>
-            <Field label="Port"><input type="number" min="0" max="65535" value={draft.web.port} onChange={(event) => update(['web', 'port'], Number(event.target.value))} /></Field>
-          </div>
-          <p className="panel-note">Both are read when <code className="mono">milo serve</code> starts, and the URL it prints carries the token that authorizes the page. <code className="mono">milo web</code> runs this screen alone, with <code className="mono">--host</code> and <code className="mono">--port</code> overriding them for one run.</p>
-          <p className="panel-note">Anything but loopback is reachable from the network, and that token is then the only thing between a stranger and this install.</p>
-        </Section>
-        <Section title="Tools" description="Optional capabilities Milo can use." active={current === 'tools'}>
-          <Field label="Web search"><Select label="Web search" value={draft.search?.provider ?? 'off'} choices={SEARCH_PROVIDERS.map((value) => ({ value, label: SEARCH_LABELS[value] }))} onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })} /><small>Which service answers a search. Off, the web search tool is not offered at all.</small></Field>
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
-          {data?.google.kind === 'connected' ? (
-            <>
-              <p className="panel-note">
-                Connected as <code className="mono">{data.google.email ?? 'an account Gmail would not name'}</code>
-                {data.google.connectedAt ? ` since ${data.google.connectedAt.slice(0, 10)}` : ''}. Access:{' '}
-                <code className="mono">{tierOf(data.google.tiers, data.google.access)?.label ?? data.google.access}</code> —{' '}
-                {tierOf(data.google.tiers, data.google.access)?.description}
-              </p>
-              <p className="panel-note">
-                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. Tools that act
-                on mail or its labels: <code className="mono">{data.google.writeTools.join(', ')}</code>{' '}
-                — each only as far as this access allows, and each asks before it acts. To widen it, run{' '}
-                <code className="mono">milo google connect</code> again: Google grants access only on a
-                fresh consent.
-              </p>
-            </>
-          ) : data?.google.kind === 'wanted' ? (
-            <p className="panel-note">
-              The tools are on in the config, but no account has been allowed yet. Run{' '}
-              <code className="mono">milo google connect</code> on the machine Milo runs on — it asks
-              how much access to allow and opens the browser there:
-            </p>
-          ) : (
-            <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. You choose how much access to give — reading is the base, and nothing is written without a level you picked.</p>
-          )}
-          <label className="check-row"><input type="checkbox" checked={draft.google.enabled} onChange={(event) => update(['google', 'enabled'], event.target.checked)} /> Enable Gmail and Drive (restart to apply)</label>
-          {data?.google.kind === 'connected' ? (
-            <p className="panel-note">
-              To disconnect, run <code className="mono">milo google forget</code> on the machine Milo
-              runs on.
-            </p>
-          ) : (
-            <>
-              <ol className="panel-note">
-                {GOOGLE_STEPS.map((step) => (
-                  <li key={step.what}>
-                    {step.url ? <a href={step.url} target="_blank" rel="noreferrer">{step.what}</a> : step.what}
-                    {step.why ? ` — ${step.why}` : ''}
-                  </li>
-                ))}
-              </ol>
-              <p className="panel-note">Then run <code className="mono">milo google connect</code> on the machine Milo runs on. It walks the same steps and prints those links. The shortcut at <a href={GOOGLE_SHORTCUT} target="_blank" rel="noreferrer">Google&rsquo;s Workspace guide</a> creates the project, enables the APIs and downloads a <code className="mono">credentials.json</code>, which <code className="mono">--credentials</code> takes.</p>
-            </>
-          )}
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Browser</h3>
-          <label className="check-row"><input type="checkbox" checked={draft.browser.enabled} onChange={(event) => update(['browser', 'enabled'], event.target.checked)} /> Enable the browser (restart to apply)</label>
-          <label className="check-row"><input type="checkbox" checked={draft.browser.headless} onChange={(event) => update(['browser', 'headless'], event.target.checked)} /> Run without a visible window</label>
-          <div className="form-grid">
-            <Field className="full" label="Browser binary"><input value={draft.browser.chromePath ?? ''} onChange={(event) => update(['browser', 'chromePath'], event.target.value || null)} placeholder="auto — the first one found" /></Field>
-            <Field className="full" label="Profile directory"><input value={draft.browser.profileDir ?? ''} onChange={(event) => update(['browser', 'profileDir'], event.target.value || null)} placeholder="its own profile" /></Field>
-            <Field label="Attach to (CDP URL)"><input value={draft.browser.cdpUrl ?? ''} onChange={(event) => update(['browser', 'cdpUrl'], event.target.value || null)} placeholder="host:port" /><small>Drive a browser already running with remote debugging. Empty, Milo starts its own.</small></Field>
-            <Field label="Page snapshots kept"><input type="number" min="0" value={draft.browser.keepSnapshots} onChange={(event) => update(['browser', 'keepSnapshots'], Number(event.target.value))} /><small>Page snapshots kept in context; the oldest are dropped past this.</small></Field>
-          </div>
-          <div className="button-row">
-            <button className="button" type="button" onClick={async () => { try { setBrowsers(await api('browsers')) } catch (error) { setNotice({ text: message(error), error: true }) } }}>Find browsers</button>
-            <button className="button" type="button" disabled={saving} onClick={() => void startJob('browser-install')}><Icon name="download" size={14} /> Download Chrome for Testing</button>
-            <button className="button" type="button" onClick={async () => { try { setProfiles(await api('profiles')) } catch (error) { setNotice({ text: message(error), error: true }) } }}>Find profiles</button>
-          </div>
-          {browsers && (browsers.length === 0 ? <p className="list-empty">No browser found on this machine.</p> : browsers.map((browser) => <div className="entry-row" key={browser.path}>
-            <div><div className="secret-name">{browser.name}{browser.version ? ` · ${browser.version}` : ''}</div><div className="secret-state">{browser.path}</div></div>
-            <button className="button" type="button" onClick={() => { update(['browser', 'chromePath'], browser.path); setNotice({ text: 'Browser chosen — Save changes to keep it.', error: false }) }}>Use</button>
-          </div>))}
-          {profiles && (profiles.length === 0 ? <p className="list-empty">No profile found to copy.</p> : profiles.map((profile) => <div className="entry-row" key={profile.dir}>
-            <div><div className="secret-name">{profile.name}</div><div className="secret-state">{profile.dir} · {humanSize(profile.bytes)}</div></div>
-            <button className="button" type="button" disabled={saving} onClick={() => void startJob('profile-copy', { id: profile.id, dir: profile.dir })}>Copy and use</button>
-          </div>))}
-          <p className="panel-note">Copying a profile carries the sign-in from the browser you use, so Milo then acts as you on those sites. Close that browser first — a profile in use cannot be copied.</p>
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Computer Use</h3>
-          <label className="check-row"><input type="checkbox" checked={draft.computer?.enabled ?? false} onChange={(event) => update(['computer', 'enabled'], event.target.checked)} /> Enable Computer Use (restart to apply)</label>
-          <p className="panel-note">
-            Drive native desktop applications on this machine. In Ask and Auto modes, approval covers observing one window for the current turn and each action asks separately; Unrestricted mode runs both without prompting. Unavailable in Plan mode, routines, delegated work, and shared chats.
-          </p>
-          {data?.computer ? (
-            <div className="entry-row">
-              <div>
-                <div className="secret-name">{data.computer.summary}</div>
-                <div className="secret-state">
-                  {data.computer.available ? 'Host backend ready' : (data.computer.reason ?? 'Host backend unavailable')}
-                </div>
-                {data.computer.limitations.map((limitation) => (
-                  <div className="secret-state" key={limitation}>{limitation}</div>
-                ))}
-              </div>
-              <button
-                className="button"
-                type="button"
-                onClick={async () => {
-                  try {
-                    const next = await api<ComputerStatus>('computer-status')
-                    setData((current) => (current ? { ...current, computer: next } : current))
-                    setNotice({ text: `Computer Use status: ${next.summary}`, error: !next.available })
-                  } catch (error) {
-                    setNotice({ text: message(error), error: true })
-                  }
-                }}
-              >
-                Check status
-              </button>
-            </div>
-          ) : null}
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>MCP servers</h3>
-          {mcp?.error ? <p className="panel-note">{mcp.error}</p> : null}
-          {!mcp
-            ? <p className="list-empty">Reading…</p>
-            : mcp.servers.length === 0
-              ? <p className="panel-note">No external tool servers. A server is a command line, written in <code className="mono">{mcp.file}</code>.</p>
-              : mcp.servers.map((server) => (
-                <div className="entry-row" key={server.name}>
-                  <div>
-                    <div className="secret-name">{server.name}</div>
-                    <div className="secret-state">{server.command}</div>
-                    <div className="secret-state">{describeMcpServer(server)}</div>
-                    {server.error ? <div className="secret-state">{server.error}</div> : null}
+          {/* ── Provider & model ─────────────────────────────────────── */}
+          <Section title="Provider & model" description="Choose the provider and model that answer your sessions." active={current === 'provider'}>
+            {phone ? (
+              <>
+                <div className="mobile-model-card">
+                  <div className="mobile-model-card-info">
+                    <span className="mobile-model-card-label">
+                      {draft.model === data.config.model && draft.provider === data.config.provider ? 'Active model' : 'Selected model (unsaved)'}
+                    </span>
+                    <span className="mobile-model-card-name">{draft.model}</span>
+                    <span className="mobile-model-card-provider">
+                      {data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider}
+                    </span>
                   </div>
-                  <div className="button-row">
-                    <button className="button" type="button" disabled={!server.enabled} onClick={() => void startJob('mcp-check', { name: server.name })}>Check</button>
-                    <button className="button" type="button" onClick={() => void toggleMcpServer(server.name, !server.enabled)}>{server.enabled ? 'Disable' : 'Enable'}</button>
-                  </div>
-                </div>
-              ))}
-          <div className="button-row">
-            <button className="button" type="button" onClick={() => void reloadMcp()}>Re-read mcp.json</button>
-          </div>
-          <p className="panel-note">Every tool a server offers arrives as <code className="mono">mcp__server__tool</code>, and it asks before it runs unless the file declares it read-only. Milo starts with what each server last said its tools were and connects in the background, so a server that never answers costs nothing at startup. <span className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</span> is the file; Save below does not touch it.</p>
-        </Section>
-        <Section title="Permissions" description="The policy applies to tools that can cause effects." active={current === 'permissions'}>
-          <div className="form-grid">
-            <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: PERMISSION_LABELS[value] }))} onChange={(next) => update(['permissions', 'mode'], next)} /><small>Ask confirms every tool that can cause an effect. Auto lets a reviewing model allow the safe ones. YOLO runs everything without asking.</small></Field>
-            <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats a config rule, except a rule that denies.</small></Field>
-            <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /><small>Tool names refused outright. Outranked only by YOLO.</small></Field>
-          </div>
-          <Advanced>
-            <div className="form-grid">
-            <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /><small>Danger score the reviewer tolerates: below it the tool runs, at or above it asks. Default 0.35.</small></Field>
-            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted rides on the chat provider; OpenAI, OpenRouter, a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
-            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /><small>The model to ask, e.g. typesafe/jev, gpt-6-luna, winnow:e4b, laya. Empty uses the backend’s default.</small></Field>
-            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /><small>An endpoint of your own. Empty uses the backend default: Ollaya on 127.0.0.1:11435, or the OpenAI or OpenRouter API.</small></Field>
-            </div>
-          </Advanced>
-        </Section>
-        <Section title="Appearance" description="Choose what shows in the chat and how much the model thinks." active={current === 'display'}>
-          <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
-          <div className="form-grid">
-            <Field label="Appearance"><Select label="Appearance" value={theme} choices={[{ value: 'system', label: 'System theme' }, { value: 'light', label: 'Light theme' }, { value: 'dark', label: 'Dark theme' }]} onChange={onThemeChange} /><small>Applies to this browser only.</small></Field>
-            <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
-            <Field label="Reasoning"><Select label="Reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
-            <Field className="full" label="Colour palette">
-              <div className="palette-picker" role="radiogroup" aria-label="Colour palette">
-                {COLOR_PALETTES.map((option) => (
                   <button
-                    key={option.id}
                     type="button"
-                    className={`palette-option ${palette === option.id ? 'active' : ''}`}
-                    aria-pressed={palette === option.id}
-                    disabled={paletteSaving}
-                    onClick={() => void selectPalette(option.id)}
+                    className="button settings-btn-sm"
+                    onClick={() => {
+                      setBrowsing(draft.provider)
+                      setModelSheetOpen(true)
+                    }}
                   >
-                    <MiloMark palette={option.id} size={24} />
-                    <span className="palette-option-name">{option.label}{option.id === DEFAULT_COLOR_PALETTE ? ' (Default)' : ''}</span>
+                    Change
                   </button>
-                ))}
-              </div>
-              <small>{paletteSync ? 'Shared between Web and iPhone.' : 'Applies to this browser while sync is off. Peach is the default.'}</small>
-            </Field>
-          </div>
-          <div className="toggle-row">
-            <div className="toggle-text">
-              <span className="toggle-label">Sync palette across Web and iPhone</span>
-              <small>{paletteSync ? 'On — choosing a palette updates both surfaces.' : 'Off by default — this browser and your iPhone each keep their own palette.'}</small>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={paletteSync}
-              aria-label="Sync palette across Web and iPhone"
-              disabled={paletteSaving}
-              className={`switch ${paletteSync ? 'is-on' : ''}`}
-              onClick={() => void togglePaletteSync(!paletteSync)}
-            >
-              <span className="switch-knob" />
-            </button>
-          </div>
-          <div className="toggle-row">
-            <div className="toggle-text">
-              <span className="toggle-label">GenUI<span className="experimental-tag">Experimental</span></span>
-              <small>Milo draws the answer as it writes it — a table, a plan, a form — instead of describing it in words.</small>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={draft.display.genui === true}
-              aria-label="GenUI"
-              className={`switch ${draft.display.genui === true ? 'is-on' : ''}`}
-              onClick={() => update(['display', 'genui'], draft.display.genui !== true)}
-            >
-              <span className="switch-knob" />
-            </button>
-          </div>
-        </Section>
-        <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={current === 'skills'}>
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Installed</h3>
-          {data.skills.length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills.map((skill) => <div className="entry-row" key={skill.name}>
-            <div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ? `${skillOriginLabel(skill.origin)} · ${skill.description}` : skillOriginLabel(skill.origin)}</div></div>
-            <div className="row-actions"><button className="button danger" type="button" onClick={() => void remove(skill.name)}>Remove</button></div>
-          </div>)}
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Add a skill</h3>
-          <Field label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
-          <div className="button-row">
-            <button className="button" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}><Icon name="download" size={14} /> Install skill</button>
-            <button className="button" type="button" onClick={() => void refreshPopular()}>Browse popular</button>
-          </div>
-          {skillChoice && <div className="button-row">{skillChoice.map((name) => <button className="button" type="button" key={name} onClick={() => void install(skillSource, name)}>Install {name}</button>)}</div>}
-          {popular.length > 0 && <>
-            <h3 className="section-label" style={{ paddingInline: 0 }}>Popular</h3>
-            {popular.map((skill) => <div className="entry-row" key={`${skill.repo}-${skill.name}`}>
-              <div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ?? skill.repo}</div></div>
-              <div className="row-actions">
-                {skill.installs ? <span className="row-count">{skill.installs} install{skill.installs === 1 ? '' : 's'}</span> : null}
-                <button className="button" type="button" onClick={() => void install(`${skill.repo}/${skill.name}`)}>Install</button>
-              </div>
-            </div>)}
-          </>}
-        </Section>
-        <Section title="Sessions" description="Saved sessions, and how the transcript is kept." active={current === 'sessions'}>
-          <div className="form-grid">
-            <Field label="Compact when the context is (%)"><input type="number" min="1" max="100" value={Math.round(draft.sessions.compactAt * 100)} onChange={(event) => update(['sessions', 'compactAt'], Number(event.target.value) / 100)} /><small>Share of the model’s window that triggers a fold.</small></Field>
-            <Field label="Turns kept verbatim"><input type="number" min="1" value={draft.sessions.keepTurns} onChange={(event) => update(['sessions', 'keepTurns'], Number(event.target.value))} /><small>Turns kept word for word when compacting; older ones are summarized.</small></Field>
-            <Field label="Sessions kept"><input type="number" min="1" value={draft.sessions.maxSessions} onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))} /><small>How many sessions stay on disk.</small></Field>
-          </div>
-          <label className="check-row"><input type="checkbox" checked={draft.sessions.compaction} onChange={(event) => update(['sessions', 'compaction'], event.target.checked)} /> Compact long sessions automatically</label>
-          <label className="check-row"><input type="checkbox" checked={draft.sessions.generateTitles} onChange={(event) => update(['sessions', 'generateTitles'], event.target.checked)} /> Name each session from its first turn</label>
-          <Advanced>
-            <div className="form-grid">
-            <Field label="Fallback budget (tokens)"><input type="number" min="1024" value={draft.sessions.maxInputTokens} onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))} /><small>Used only when the model’s window is unknown.</small></Field>
-            <Field label="Context window (tokens)"><input type="number" min="1024" value={draft.sessions.contextWindow ?? ''} onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)} /><small>Overrides the catalog, for a model it does not know.</small></Field>
-            <Field label="Model that writes the names"><input value={draft.sessions.titleModel ?? ''} placeholder="Use the main model" onChange={(event) => update(['sessions', 'titleModel'], event.target.value || undefined)} /><small>One short call after the first turn. Left empty, the session’s own chat model is used.</small></Field>
-            </div>
-          </Advanced>
+                </div>
+                {modelSheetOpen && (
+                  <MobileModelSheet
+                    presets={data.presets}
+                    provider={draft.provider}
+                    model={draft.model}
+                    browsing={browsedProvider}
+                    catalog={catalog}
+                    onBrowse={setBrowsing}
+                    onPick={pickModel}
+                    onClose={() => setModelSheetOpen(false)}
+                  />
+                )}
+              </>
+            ) : (
+              <ModelPicker
+                presets={data.presets}
+                provider={draft.provider}
+                model={draft.model}
+                browsing={browsedProvider}
+                catalog={catalog}
+                onBrowse={setBrowsing}
+                onPick={pickModel}
+              />
+            )}
 
-          <h3 className="section-label" style={{ paddingInline: 0 }}>Saved sessions</h3>
-          {data.sessions.length === 0 ? <p className="list-empty">No saved sessions yet.</p> : data.sessions.map((session) => <div className="entry-row" key={session.id}>
-            <div><div className="secret-name">{session.title || session.preview || session.id}{session.id === sessionId ? ' · current' : ''}</div><div className="secret-state">{session.preview} · {session.messageCount} msgs · {formatWhen(session.updatedAt)}</div></div>
-            <div className="row-actions">
-              <button className="button" type="button" onClick={async () => { await api('resume-session', { chatId, id: session.id }); onSessionChange(session.id) }}>Open</button>
-              {session.backend?.kind !== 'command-code' && <button className="button" type="button" onClick={() => void exportSession(session.id)}><Icon name="download" size={13} /></button>}
-              {session.id === sessionId
-                ? session.backend?.kind !== 'command-code' && <button className="button" type="button" onClick={async () => { await api('clear-session', { chatId }); await load(); setNotice({ text: 'Session cleared.', error: false }) }}>Clear</button>
-                : <button className="button danger" type="button" onClick={() => void deleteSession(session.id)}><Icon name="trash" size={13} /></button>}
+            {(draft.provider === 'chatgpt' || browsedProvider === 'chatgpt') && (
+              <ChatGptAccount status={data.chatgpt} onChanged={refreshChatGpt} />
+            )}
+
+            <SettingsGroup title="Generation">
+              <SettingRow
+                label="Reasoning effort"
+                description="How hard the model thinks before replying."
+              >
+                <div className="settings-effort-wrap">
+                  <ReasoningSlider value={draft.reasoningEffort} onChange={(next) => update(['reasoningEffort'], next)} />
+                </div>
+              </SettingRow>
+            </SettingsGroup>
+
+            <Disclosure label="Advanced" meta="Endpoints, media models & token limit">
+              <SettingsGroup>
+                <SettingStack label="API URL" htmlFor="provider-api-url">
+                  <input
+                    id="provider-api-url"
+                    className="settings-input"
+                    value={draft.providers?.[currentProvider]?.baseURL ?? ''}
+                    onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)}
+                  />
+                </SettingStack>
+                <SettingStack
+                  label="Vision model"
+                  description="Override when the main provider does not report image support."
+                  htmlFor="provider-vision"
+                >
+                  <input
+                    id="provider-vision"
+                    className="settings-input"
+                    value={draft.media?.vision ?? ''}
+                    placeholder="Use the main model"
+                    onChange={(event) => update(['media', 'vision'], event.target.value || undefined)}
+                  />
+                </SettingStack>
+                <SettingStack
+                  label="Audio transcription model"
+                  description="Groq Whisper. Requires a Groq key under API keys."
+                  htmlFor="provider-audio"
+                >
+                  <input
+                    id="provider-audio"
+                    className="settings-input"
+                    value={draft.media?.audio ?? 'whisper-large-v3-turbo'}
+                    onChange={(event) => update(['media', 'audio'], event.target.value)}
+                  />
+                </SettingStack>
+                <SettingStack label="Document model" htmlFor="provider-document">
+                  <input
+                    id="provider-document"
+                    className="settings-input"
+                    value={draft.media?.document ?? ''}
+                    placeholder="Use the main model"
+                    onChange={(event) => update(['media', 'document'], event.target.value || undefined)}
+                  />
+                </SettingStack>
+                <SettingRow
+                  label="Output limit (tokens)"
+                  description="Maximum tokens per reply. Leave empty for the provider’s default."
+                  htmlFor="provider-max-tokens"
+                >
+                  <input
+                    id="provider-max-tokens"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    placeholder="Default"
+                    value={draft.maxTokens ?? ''}
+                    onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)}
+                  />
+                </SettingRow>
+              </SettingsGroup>
+            </Disclosure>
+          </Section>
+
+          {/* ── API keys ─────────────────────────────────────────────── */}
+          <Section title="API keys" description="Keys are stored locally and never shown in full." active={current === 'keys'}>
+            <div className="settings-groups-stack">
+              {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
+                const ids = group === 'providers'
+                  ? [...new Set([...data.presets.filter((item) => !item.oauth && item.id !== 'chatgpt').map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq' && id !== 'chatgpt' && !data.presets.some((item) => item.id === id && item.oauth))
+                  : group === 'audio' ? ['groq']
+                  : group === 'search' ? ['tavily', 'exa', 'parallel']
+                  : ['telegram', 'discord']
+                const label = group === 'providers' ? 'Providers' : group === 'audio' ? 'Audio' : group === 'search' ? 'Web search' : 'Gateways'
+                const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
+                const configuredCount = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
+                return (
+                  <SettingsGroup key={group} id={`keys-${group}`} title={label} meta={`${configuredCount} of ${ids.length} set`}>
+                    {orderedIds.map((id) => {
+                      const configured = Boolean(data.auth[group]?.[id]?.set)
+                      const slot = `${group}:${id}`
+                      const editing = editingSecret === slot
+                      const serviceName = group === 'providers'
+                        ? data.presets.find((preset) => preset.id === id)?.name ?? id
+                        : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
+                      return (
+                        <div className={`settings-row settings-key-row${editing ? ' is-editing' : ''}`} key={slot}>
+                          <div className="settings-key-main">
+                            <div className="settings-key-identity">
+                              {group === 'providers' && <ProviderMark id={id} size={16} />}
+                              <span className="settings-row-label">{serviceName}</span>
+                              <span className={`settings-key-status${configured ? ' is-set' : ''}`}>
+                                {configured ? data.auth[group]?.[id]?.masked : 'Not set'}
+                              </span>
+                            </div>
+                            <div className="settings-inline-actions">
+                              <button
+                                className="button settings-btn-sm"
+                                type="button"
+                                aria-expanded={editing}
+                                onClick={() => {
+                                  if (editing) setSecrets((cur) => { const next = { ...cur }; delete next[slot]; return next })
+                                  setEditingSecret(editing ? null : slot)
+                                }}
+                              >
+                                {editing ? 'Cancel' : configured ? 'Replace' : 'Add key'}
+                              </button>
+                              {configured && (
+                                <button
+                                  className="button danger settings-btn-sm"
+                                  type="button"
+                                  onClick={async () => {
+                                    await api('remove-secret', { group, id })
+                                    setSecrets((cur) => { const next = { ...cur }; delete next[slot]; return next })
+                                    setEditingSecret(null)
+                                    await load()
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {editing && (
+                            <div className="settings-key-editor">
+                              <input
+                                className="settings-input"
+                                aria-label={`${configured ? 'Replace' : 'Add'} ${id} API key`}
+                                type="password"
+                                autoComplete="new-password"
+                                placeholder={configured ? 'Paste new API key…' : 'Paste API key…'}
+                                value={secrets[slot] ?? ''}
+                                onChange={(event) => setSecrets((cur) => ({ ...cur, [slot]: event.target.value }))}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </SettingsGroup>
+                )
+              })}
             </div>
-          </div>)}
-        </Section>
+          </Section>
+
+          {/* ── Appearance ───────────────────────────────────────────── */}
+          <Section title="Appearance" description="Theme, colour palette, and how turns appear in the chat." active={current === 'display'}>
+            <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
+
+            <SettingsGroup title="Interface">
+              <SettingRow label="Theme" description="Applies to this browser only.">
+                <Segmented
+                  label="Theme"
+                  value={theme}
+                  choices={[
+                    { value: 'system', label: 'System' },
+                    { value: 'light', label: 'Light' },
+                    { value: 'dark', label: 'Dark' },
+                  ]}
+                  onChange={onThemeChange}
+                />
+              </SettingRow>
+              <SettingRow label="Tool detail" description="How much of each tool call shows in the thread.">
+                <Segmented
+                  label="Tool detail"
+                  value={draft.display.tools}
+                  choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))}
+                  onChange={(next) => update(['display', 'tools'], next)}
+                />
+              </SettingRow>
+              <SettingRow label="Reasoning" description="Whether thoughts start open or folded.">
+                <Segmented
+                  label="Reasoning"
+                  value={draft.display.thinking}
+                  choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))}
+                  onChange={(next) => update(['display', 'thinking'], next)}
+                />
+              </SettingRow>
+              <SettingRow
+                label="GenUI"
+                badge={<span className="experimental-tag">Experimental</span>}
+                description="Draw tables, plans, and forms directly inline instead of describing them in prose."
+              >
+                <Switch
+                  label="GenUI"
+                  checked={draft.display.genui === true}
+                  onChange={(next) => update(['display', 'genui'], next)}
+                />
+              </SettingRow>
+            </SettingsGroup>
+
+            <SettingsGroup
+              title="Colour palette"
+              footer={paletteSync ? 'Shared between Web and iPhone.' : 'Applies to this browser while sync is off. Peach is the default.'}
+            >
+              <div className="settings-row settings-row-stack">
+                <div className="palette-picker" role="radiogroup" aria-label="Colour palette">
+                  {COLOR_PALETTES.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`palette-option ${palette === option.id ? 'active' : ''}`}
+                      aria-pressed={palette === option.id}
+                      disabled={paletteSaving}
+                      onClick={() => void selectPalette(option.id)}
+                    >
+                      <MiloMark palette={option.id} size={20} />
+                      <span className="palette-option-name">{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <SettingRow
+                label="Sync across Web and iPhone"
+                description={paletteSync ? 'Choosing a palette updates both surfaces.' : 'Each surface keeps its own palette.'}
+              >
+                <Switch
+                  label="Sync palette across Web and iPhone"
+                  checked={paletteSync}
+                  disabled={paletteSaving}
+                  onChange={(next) => void togglePaletteSync(next)}
+                />
+              </SettingRow>
+            </SettingsGroup>
+          </Section>
+
+          {/* ── Tools ────────────────────────────────────────────────── */}
+          <Section title="Tools" description="Optional capabilities Milo can use during a session." active={current === 'tools'}>
+            <div className="settings-groups-stack">
+              <SettingsGroup title="Web search">
+                <SettingRow
+                  label="Search provider"
+                  description="Off removes the web search tool from Milo’s catalog."
+                >
+                  <div className="settings-select-wrap">
+                    <Select
+                      label="Web search"
+                      value={draft.search?.provider ?? 'off'}
+                      choices={SEARCH_PROVIDERS.map((value) => ({ value, label: SEARCH_LABELS[value] }))}
+                      onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })}
+                    />
+                  </div>
+                </SettingRow>
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Google"
+                meta={data.google.kind === 'connected' ? 'Connected' : data.google.kind === 'wanted' ? 'Not authorised' : 'Not connected'}
+                footer={
+                  data.google.kind === 'connected'
+                    ? <>To change access level, run <code className="mono">milo google connect</code>. To disconnect, run <code className="mono">milo google forget</code>.</>
+                    : undefined
+                }
+              >
+                <SettingRow
+                  label="Gmail and Drive"
+                  badge={<span className="settings-tag">Restart</span>}
+                  description={
+                    data.google.kind === 'connected'
+                      ? `${data.google.email ?? 'Connected account'}${data.google.connectedAt ? ` · since ${data.google.connectedAt.slice(0, 10)}` : ''} · ${tierOf(data.google.tiers, data.google.access)?.label ?? data.google.access}`
+                      : 'Read mail and Drive, or grant write tiers with your own Google Cloud OAuth app.'
+                  }
+                >
+                  <Switch
+                    label="Enable Gmail and Drive"
+                    checked={draft.google.enabled}
+                    onChange={(next) => update(['google', 'enabled'], next)}
+                  />
+                </SettingRow>
+                {data.google.kind === 'connected' && (
+                  <div className="settings-row">
+                    <p className="settings-row-desc">
+                      Reading: <code className="mono">{data.google.tools.join(', ')}</code>. Mail actions: <code className="mono">{data.google.writeTools.join(', ')}</code> — gated by access level and confirmed before acting.
+                    </p>
+                  </div>
+                )}
+                {data.google.kind !== 'connected' && (
+                  <div className="settings-row settings-row-stack">
+                    <Disclosure label="Setup guide" meta="6 steps in Google Cloud">
+                      <ol className="settings-steps">
+                        {GOOGLE_STEPS.map((step) => (
+                          <li key={step.what}>
+                            {step.url ? <a className="settings-link" href={step.url} target="_blank" rel="noreferrer">{step.what}</a> : step.what}
+                            {step.why ? ` — ${step.why}` : ''}
+                          </li>
+                        ))}
+                      </ol>
+                      <p className="settings-row-desc settings-steps-foot">
+                        Then run <code className="mono">milo google connect</code> on this machine. The shortcut at{' '}
+                        <a className="settings-link" href={GOOGLE_SHORTCUT} target="_blank" rel="noreferrer">Google’s Workspace guide</a>{' '}
+                        creates the project and downloads <code className="mono">credentials.json</code> for <code className="mono">--credentials</code>.
+                      </p>
+                    </Disclosure>
+                  </div>
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Browser"
+                footer="Copying a browser profile carries your sign-ins into Milo. Close that browser before copying."
+              >
+                <SettingRow
+                  label="Enable browser"
+                  badge={<span className="settings-tag">Restart</span>}
+                  description="Let Milo open pages, click, and inspect web apps."
+                >
+                  <Switch
+                    label="Enable the browser"
+                    checked={draft.browser.enabled}
+                    onChange={(next) => update(['browser', 'enabled'], next)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Headless mode"
+                  description="Run without a visible browser window."
+                  disabled={!draft.browser.enabled}
+                >
+                  <Switch
+                    label="Run without a visible window"
+                    checked={draft.browser.headless}
+                    onChange={(next) => update(['browser', 'headless'], next)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Page snapshots kept"
+                  description="Oldest snapshots are dropped past this limit."
+                  htmlFor="browser-snapshots"
+                  disabled={!draft.browser.enabled}
+                >
+                  <input
+                    id="browser-snapshots"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="0"
+                    value={draft.browser.keepSnapshots}
+                    onChange={(event) => update(['browser', 'keepSnapshots'], Number(event.target.value))}
+                  />
+                </SettingRow>
+                <div className="settings-row">
+                  <div className="settings-inline-actions">
+                    <button className="button settings-btn-sm" type="button" onClick={async () => { try { setBrowsers(await api('browsers')) } catch (error) { setNotice({ text: message(error), error: true }) } }}>Find browsers</button>
+                    <button className="button settings-btn-sm" type="button" disabled={saving} onClick={() => void startJob('browser-install')}><Icon name="download" size={14} /> Download Chrome</button>
+                    <button className="button settings-btn-sm" type="button" onClick={async () => { try { setProfiles(await api('profiles')) } catch (error) { setNotice({ text: message(error), error: true }) } }}>Find profiles</button>
+                  </div>
+                </div>
+                {browsers && (browsers.length === 0
+                  ? <div className="settings-row"><p className="settings-empty-inline">No browser found on this machine.</p></div>
+                  : browsers.map((browser) => (
+                    <SettingRow
+                      key={browser.path}
+                      label={`${browser.name}${browser.version ? ` · ${browser.version}` : ''}`}
+                      description={<span className="mono">{browser.path}</span>}
+                    >
+                      <button className="button settings-btn-sm" type="button" onClick={() => { update(['browser', 'chromePath'], browser.path); setNotice({ text: 'Browser chosen — Save changes to keep it.', error: false }) }}>Use</button>
+                    </SettingRow>
+                  ))
+                )}
+                {profiles && (profiles.length === 0
+                  ? <div className="settings-row"><p className="settings-empty-inline">No profile found to copy.</p></div>
+                  : profiles.map((profile) => (
+                    <SettingRow
+                      key={profile.dir}
+                      label={profile.name}
+                      description={<span className="mono">{profile.dir} · {humanSize(profile.bytes)}</span>}
+                    >
+                      <button className="button settings-btn-sm" type="button" disabled={saving} onClick={() => void startJob('profile-copy', { id: profile.id, dir: profile.dir })}>Copy and use</button>
+                    </SettingRow>
+                  ))
+                )}
+                <div className="settings-row settings-row-stack">
+                  <Disclosure label="Paths & remote debugging" meta="Binary, profile, CDP">
+                    <div className="settings-subfields">
+                      <div className="settings-subfield">
+                        <label className="settings-row-label" htmlFor="browser-binary">Browser binary</label>
+                        <input id="browser-binary" className="settings-input" value={draft.browser.chromePath ?? ''} onChange={(event) => update(['browser', 'chromePath'], event.target.value || null)} placeholder="Auto — first browser found" />
+                      </div>
+                      <div className="settings-subfield">
+                        <label className="settings-row-label" htmlFor="browser-profile">Profile directory</label>
+                        <input id="browser-profile" className="settings-input" value={draft.browser.profileDir ?? ''} onChange={(event) => update(['browser', 'profileDir'], event.target.value || null)} placeholder="Milo’s own profile" />
+                      </div>
+                      <div className="settings-subfield">
+                        <label className="settings-row-label" htmlFor="browser-cdp">Attach to (CDP URL)</label>
+                        <input id="browser-cdp" className="settings-input" value={draft.browser.cdpUrl ?? ''} onChange={(event) => update(['browser', 'cdpUrl'], event.target.value || null)} placeholder="host:port" />
+                        <p className="settings-row-desc">Drive a browser already running with remote debugging.</p>
+                      </div>
+                    </div>
+                  </Disclosure>
+                </div>
+              </SettingsGroup>
+
+              <SettingsGroup title="Computer Use">
+                <SettingRow
+                  label="Enable Computer Use"
+                  badge={<span className="settings-tag">Restart</span>}
+                  description="Drive native desktop applications on this machine. Unavailable in Plan mode, routines, and shared chats."
+                >
+                  <Switch
+                    label="Enable Computer Use"
+                    checked={draft.computer?.enabled ?? false}
+                    onChange={(next) => update(['computer', 'enabled'], next)}
+                  />
+                </SettingRow>
+                {data.computer && (() => {
+                  const setupHelp =
+                    data.computer.setupHelp !== undefined
+                      ? data.computer.setupHelp
+                      : computerSetupHelp(data.computer)
+                  return (
+                    <SettingRow
+                      label={
+                        <span className="settings-status-label">
+                          <span className={`settings-dot${data.computer.available ? ' is-ok' : ' is-off'}`} />
+                          {data.computer.summary}
+                        </span>
+                      }
+                      description={
+                        <>
+                          {data.computer.available ? 'Host backend ready' : (data.computer.reason ?? 'Host backend unavailable')}
+                          {data.computer.limitations.length > 0 && ` · ${data.computer.limitations.join(' · ')}`}
+                        </>
+                      }
+                    >
+                      <div className="settings-inline-actions">
+                        {setupHelp && onStartSession && (
+                          <button
+                            className="button primary settings-btn-sm"
+                            type="button"
+                            disabled={startingHelp}
+                            onClick={async () => {
+                              setStartingHelp(true)
+                              try {
+                                const outcome = await onStartSession(setupHelp.prompt)
+                                if (!outcome.ok && outcome.error) {
+                                  setNotice({ text: outcome.error, error: true })
+                                }
+                              } catch (error) {
+                                setNotice({ text: message(error), error: true })
+                              } finally {
+                                setStartingHelp(false)
+                              }
+                            }}
+                          >
+                            {startingHelp ? 'Opening…' : setupHelp.label}
+                          </button>
+                        )}
+                        <button
+                          className="button settings-btn-sm"
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const next = await api<ComputerStatus>('computer-status')
+                              setData((cur) => (cur ? { ...cur, computer: next } : cur))
+                              setNotice({ text: `Computer Use status: ${next.summary}`, error: !next.available })
+                            } catch (error) {
+                              setNotice({ text: message(error), error: true })
+                            }
+                          }}
+                        >
+                          Check status
+                        </button>
+                      </div>
+                    </SettingRow>
+                  )
+                })()}
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="MCP servers"
+                action={<button className="button settings-btn-sm" type="button" onClick={() => void reloadMcp()}>Reload mcp.json</button>}
+                footer={<>Configured in <code className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</code>. Save changes does not touch this file.</>}
+              >
+                {mcp?.error && (
+                  <div className="settings-row">
+                    <p className="settings-row-desc settings-error-text">{mcp.error}</p>
+                  </div>
+                )}
+                {!mcp ? (
+                  <div className="settings-row"><p className="settings-empty-inline">Reading…</p></div>
+                ) : mcp.servers.length === 0 ? (
+                  <div className="settings-row"><p className="settings-empty-inline">No external tool servers configured.</p></div>
+                ) : (
+                  mcp.servers.map((server) => (
+                    <SettingRow
+                      key={server.name}
+                      label={
+                        <span className="settings-status-label">
+                          <span className={`settings-dot${!server.enabled ? ' is-off' : server.state === 'ready' ? ' is-ok' : server.state === 'failed' ? ' is-err' : ' is-warn'}`} />
+                          {server.name}
+                        </span>
+                      }
+                      description={
+                        <>
+                          <code className="mono">{server.command}</code>
+                          {' · '}
+                          {describeMcpServer(server)}
+                          {server.error ? ` · ${server.error}` : ''}
+                        </>
+                      }
+                    >
+                      <div className="settings-inline-actions">
+                        <button className="button settings-btn-sm" type="button" disabled={!server.enabled} onClick={() => void startJob('mcp-check', { name: server.name })}>Check</button>
+                        <button className="button settings-btn-sm" type="button" onClick={() => void toggleMcpServer(server.name, !server.enabled)}>{server.enabled ? 'Disable' : 'Enable'}</button>
+                      </div>
+                    </SettingRow>
+                  ))
+                )}
+              </SettingsGroup>
+            </div>
+          </Section>
+
+          {/* ── Skills ───────────────────────────────────────────────── */}
+          <Section title="Skills" description="Instructions the model can load on demand. Install only what you trust." active={current === 'skills'}>
+            <div className="settings-groups-stack">
+              <SettingsGroup title="Installed" meta={`${data.skills.length}`}>
+                {data.skills.length === 0 ? (
+                  <div className="settings-row"><p className="settings-empty-inline">No skills installed.</p></div>
+                ) : (
+                  data.skills.map((skill) => (
+                    <SettingRow
+                      key={skill.name}
+                      label={skill.name}
+                      description={skill.description ? `${skillOriginLabel(skill.origin)} · ${skill.description}` : skillOriginLabel(skill.origin)}
+                    >
+                      <button className="button danger settings-btn-sm" type="button" onClick={() => void remove(skill.name)}>Remove</button>
+                    </SettingRow>
+                  ))
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup title="Add a skill">
+                <div className="settings-row settings-row-stack">
+                  <div className="settings-input-action">
+                    <input
+                      className="settings-input"
+                      aria-label="Skill source"
+                      value={skillSource}
+                      onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }}
+                      placeholder="owner/repo, URL, or local folder"
+                    />
+                    <button className="button primary settings-btn-sm" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}>
+                      <Icon name="download" size={14} /> Install
+                    </button>
+                    <button className="button settings-btn-sm" type="button" onClick={() => void refreshPopular()}>Browse popular</button>
+                  </div>
+                  {skillChoice && (
+                    <div className="settings-inline-actions settings-choice-row">
+                      {skillChoice.map((name) => (
+                        <button className="button settings-btn-sm" type="button" key={name} onClick={() => void install(skillSource, name)}>Install {name}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SettingsGroup>
+
+              {popular.length > 0 && (
+                <SettingsGroup title="Popular">
+                  {popular.map((skill) => (
+                    <SettingRow
+                      key={`${skill.repo}-${skill.name}`}
+                      label={skill.name}
+                      description={skill.description ?? skill.repo}
+                    >
+                      <div className="settings-inline-actions">
+                        {skill.installs ? <span className="row-count">{skill.installs} install{skill.installs === 1 ? '' : 's'}</span> : null}
+                        <button className="button settings-btn-sm" type="button" onClick={() => void install(`${skill.repo}/${skill.name}`)}>Install</button>
+                      </div>
+                    </SettingRow>
+                  ))}
+                </SettingsGroup>
+              )}
+            </div>
+          </Section>
+
+          {/* ── Memory ───────────────────────────────────────────────── */}
+          <Section title="Memory" description="What Milo keeps between sessions and how it recalls it." active={current === 'memory'}>
+            <div className="settings-groups-stack">
+              <SettingsGroup title="Automatic memory">
+                <SettingRow
+                  label="Save facts automatically"
+                  description="Extract durable facts at the end of each turn."
+                >
+                  <Switch
+                    label="Save facts automatically at the end of each turn"
+                    checked={draft.memory.derive !== false}
+                    onChange={(next) => update(['memory', 'derive'], next)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Recent messages kept"
+                  description="Leave empty for Milo’s default."
+                  htmlFor="memory-keep-said"
+                >
+                  <input
+                    id="memory-keep-said"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    placeholder="Default"
+                    value={draft.memory.keepSaid ?? ''}
+                    onChange={(event) => update(['memory', 'keepSaid'], event.target.value ? Number(event.target.value) : undefined)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Notes used per reply"
+                  description="Maximum memories included in each turn."
+                  htmlFor="memory-recall-limit"
+                >
+                  <input
+                    id="memory-recall-limit"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    placeholder="Default"
+                    value={draft.memory.recallLimit ?? ''}
+                    onChange={(event) => update(['memory', 'recallLimit'], event.target.value ? Number(event.target.value) : undefined)}
+                  />
+                </SettingRow>
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Recall by meaning"
+                meta={
+                  draft.memory.embedding
+                    ? `${draft.memory.embedding.provider === 'ollama' ? 'Local' : 'OpenRouter'}${draft.memory.embedding.model ? ` · ${draft.memory.embedding.model}` : ''}`
+                    : 'Off'
+                }
+              >
+                <button className={`settings-choice-row-btn${embeddingMode === 'ollama' ? ' is-selected' : ''}`} type="button" disabled={saving} onClick={() => void startJob('embed-provision')}>
+                  <span className="settings-choice-info">
+                    <span className="settings-row-label">Use this machine</span>
+                    <span className="settings-row-desc">Downloads the local engine (~1.9 GB) and model. Nothing leaves your computer.</span>
+                  </span>
+                  {embeddingMode === 'ollama' && <Icon name="check" size={15} />}
+                </button>
+                <button className={`settings-choice-row-btn${embeddingMode === 'openrouter' ? ' is-selected' : ''}`} type="button" disabled={saving} onClick={() => void saveNow((config) => { config.memory.embedding = { provider: 'openrouter' } }, 'Embeddings set to OpenRouter — uses the OpenRouter key from API keys. Restart to apply.')}>
+                  <span className="settings-choice-info">
+                    <span className="settings-row-label">Use OpenRouter</span>
+                    <span className="settings-row-desc">Uses your OpenRouter API key. Notes are sent to OpenRouter for indexing.</span>
+                  </span>
+                  {embeddingMode === 'openrouter' && <Icon name="check" size={15} />}
+                </button>
+                <button className={`settings-choice-row-btn${embeddingMode === 'off' ? ' is-selected' : ''}`} type="button" disabled={saving || !draft.memory.embedding} onClick={() => void saveNow((config) => { delete config.memory.embedding }, 'Embeddings off. Restart to apply.')}>
+                  <span className="settings-choice-info">
+                    <span className="settings-row-label">Off (word matching only)</span>
+                    <span className="settings-row-desc">Recall matches exact keywords without embeddings.</span>
+                  </span>
+                  {embeddingMode === 'off' && <Icon name="check" size={15} />}
+                </button>
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Notes"
+                meta={data.memoryStats ? `${data.memoryStats.facts} fact${data.memoryStats.facts === 1 ? '' : 's'} · ${humanSize(data.memoryStats.bytes)}` : undefined}
+                footer="Editing or forgetting a note does not erase past messages, which may still be recalled."
+              >
+                <div className="settings-row">
+                  <div className="settings-search-field">
+                    <Icon name="search" size={15} />
+                    <input
+                      aria-label="Search notes"
+                      type="search"
+                      placeholder="Search notes…"
+                      value={noteQuery}
+                      onChange={(event) => { setNoteQuery(event.target.value); setNoteOffset(0) }}
+                    />
+                  </div>
+                </div>
+                {notes === null ? (
+                  <div className="settings-row"><p className="settings-empty-inline">Reading…</p></div>
+                ) : notes.length === 0 ? (
+                  <div className="settings-row"><p className="settings-empty-inline">{noteQuery ? 'No notes match your search.' : 'Nothing is remembered yet.'}</p></div>
+                ) : (
+                  notes.map((note) => (
+                    <div className="settings-row settings-note-row" key={note.id}>
+                      <div className="settings-row-info">
+                        {editingNote === note.id ? (
+                          <div className="settings-note-edit">
+                            <textarea className="settings-input settings-textarea" aria-label="Note text" value={noteText} onChange={(event) => setNoteText(event.target.value)} />
+                            <div className="settings-inline-actions">
+                              <button className="button primary settings-btn-sm" type="button" onClick={() => void saveNote(note.id)}>Save</button>
+                              <button className="button settings-btn-sm" type="button" onClick={() => setEditingNote(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="settings-row-label">{note.text}</div>
+                        )}
+                        <p className="settings-row-desc">
+                          {formatWhen(note.createdAt)} · <span className="mono">{note.id.slice(0, 8)}</span>
+                          {note.source ? (
+                            <> · “{note.source.quote}” <button className="settings-inline-link" type="button" onClick={() => onOpenSession(note.source!.session)}>Open session</button></>
+                          ) : null}
+                        </p>
+                      </div>
+                      <div className="settings-inline-actions">
+                        <button className="button button-icon settings-btn-icon" type="button" title="Edit note" aria-label="Edit note" onClick={() => { setEditingNote(note.id); setNoteText(note.text) }}><Icon name="edit" size={15} /></button>
+                        <button className="button button-icon settings-btn-icon" type="button" title="Forget note" aria-label="Forget note" onClick={() => void forgetNote(note.id)}><Icon name="trash" size={15} /></button>
+                      </div>
+                    </div>
+                  ))
+                )}
+                {(noteOffset > 0 || notesMore) && (
+                  <div className="settings-row">
+                    <div className="settings-inline-actions">
+                      <button className="button settings-btn-sm" type="button" disabled={noteOffset === 0} onClick={() => setNoteOffset(Math.max(0, noteOffset - 50))}>Previous</button>
+                      <button className="button settings-btn-sm" type="button" disabled={!notesMore} onClick={() => setNoteOffset(noteOffset + 50)}>Next</button>
+                    </div>
+                  </div>
+                )}
+              </SettingsGroup>
+            </div>
+          </Section>
+
+          {/* ── Permissions ──────────────────────────────────────────── */}
+          <Section title="Permissions" description="Control how Milo asks before running tools with side effects." active={current === 'permissions'}>
+            <div className="settings-groups-stack">
+              <SettingsGroup title="Tool policy">
+                <SettingRow
+                  label="Approval mode"
+                  description={PERMISSION_DESCRIPTIONS[draft.permissions.mode]}
+                >
+                  <Segmented
+                    label="Mode"
+                    value={draft.permissions.mode}
+                    choices={PERMISSION_MODES.map((value) => ({ value, label: PERMISSION_LABELS[value] }))}
+                    onChange={(next) => update(['permissions', 'mode'], next)}
+                  />
+                </SettingRow>
+                <SettingStack
+                  label="Always-allowed tools"
+                  description="Comma-separated tool names never asked about. Overridden by deny rules."
+                  htmlFor="perm-allow"
+                >
+                  <input
+                    id="perm-allow"
+                    className="settings-input"
+                    placeholder="e.g. read_file, list_dir"
+                    value={draft.permissions.allow.join(', ')}
+                    onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))}
+                  />
+                </SettingStack>
+                <SettingStack
+                  label="Blocked tools"
+                  description="Comma-separated tool names refused outright unless in YOLO mode."
+                  htmlFor="perm-deny"
+                >
+                  <input
+                    id="perm-deny"
+                    className="settings-input"
+                    placeholder="e.g. shell_command"
+                    value={draft.permissions.deny.join(', ')}
+                    onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))}
+                  />
+                </SettingStack>
+              </SettingsGroup>
+
+              <Disclosure label="Reviewer & classifier" meta="Auto mode threshold & model">
+                <SettingsGroup>
+                  <SettingRow
+                    label="Reviewer threshold"
+                    description="Danger score below which a tool runs automatically (default 0.35)."
+                    htmlFor="perm-threshold"
+                  >
+                    <input
+                      id="perm-threshold"
+                      className="settings-input settings-input-num"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={draft.permissions.jevThreshold}
+                      onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label="Classifier backend"
+                    badge={<span className="settings-tag">Restart</span>}
+                    description="Service used to review tool calls in Auto mode."
+                  >
+                    <div className="settings-select-wrap">
+                      <Select
+                        label="Classifier backend"
+                        value={draft.classifier.backend}
+                        choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))}
+                        onChange={(next) => update(['classifier', 'backend'], next)}
+                      />
+                    </div>
+                  </SettingRow>
+                  <SettingStack
+                    label="Classifier model"
+                    description="Leave empty for the backend’s default."
+                    htmlFor="perm-classifier-model"
+                  >
+                    <input
+                      id="perm-classifier-model"
+                      className="settings-input"
+                      value={draft.classifier.model ?? ''}
+                      placeholder="Backend default"
+                      onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)}
+                    />
+                  </SettingStack>
+                  <SettingStack
+                    label="Classifier URL"
+                    description="Custom endpoint override. Empty uses the backend default."
+                    htmlFor="perm-classifier-url"
+                  >
+                    <input
+                      id="perm-classifier-url"
+                      className="settings-input"
+                      value={draft.classifier.url ?? ''}
+                      placeholder="Backend default"
+                      onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)}
+                    />
+                  </SettingStack>
+                </SettingsGroup>
+              </Disclosure>
+            </div>
+          </Section>
+
+          {/* ── Sessions ─────────────────────────────────────────────── */}
+          <Section title="Sessions" description="Context compaction, automatic naming, and saved history." active={current === 'sessions'}>
+            <div className="settings-groups-stack">
+              <SettingsGroup title="History & compaction">
+                <SettingRow
+                  label="Compact long sessions automatically"
+                  description="Summarize older turns when the context fills up."
+                >
+                  <Switch
+                    label="Compact long sessions automatically"
+                    checked={draft.sessions.compaction}
+                    onChange={(next) => update(['sessions', 'compaction'], next)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Name sessions automatically"
+                  description="Generate a short title after the first turn."
+                >
+                  <Switch
+                    label="Name each session from its first turn"
+                    checked={draft.sessions.generateTitles}
+                    onChange={(next) => update(['sessions', 'generateTitles'], next)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Compact at (%)"
+                  description="Share of the context window that triggers compaction."
+                  htmlFor="sessions-compact-at"
+                >
+                  <input
+                    id="sessions-compact-at"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={Math.round(draft.sessions.compactAt * 100)}
+                    onChange={(event) => update(['sessions', 'compactAt'], Number(event.target.value) / 100)}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Turns kept verbatim"
+                  description="Recent turns preserved word for word during compaction."
+                  htmlFor="sessions-keep-turns"
+                >
+                  <input
+                    id="sessions-keep-turns"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    value={draft.sessions.keepTurns}
+                    onChange={(event) => update(['sessions', 'keepTurns'], Number(event.target.value))}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Sessions kept"
+                  description="Maximum saved sessions kept on disk."
+                  htmlFor="sessions-max"
+                >
+                  <input
+                    id="sessions-max"
+                    className="settings-input settings-input-num"
+                    type="number"
+                    min="1"
+                    value={draft.sessions.maxSessions}
+                    onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))}
+                  />
+                </SettingRow>
+              </SettingsGroup>
+
+              <Disclosure label="Advanced" meta="Context overrides & title model">
+                <SettingsGroup>
+                  <SettingRow
+                    label="Fallback budget (tokens)"
+                    description="Used only when the model’s context window is unknown."
+                    htmlFor="sessions-fallback-budget"
+                  >
+                    <input
+                      id="sessions-fallback-budget"
+                      className="settings-input settings-input-num"
+                      type="number"
+                      min="1024"
+                      value={draft.sessions.maxInputTokens}
+                      onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label="Context window (tokens)"
+                    description="Override the catalog window for an unknown model."
+                    htmlFor="sessions-context-window"
+                  >
+                    <input
+                      id="sessions-context-window"
+                      className="settings-input settings-input-num"
+                      type="number"
+                      min="1024"
+                      placeholder="Auto"
+                      value={draft.sessions.contextWindow ?? ''}
+                      onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)}
+                    />
+                  </SettingRow>
+                  <SettingStack
+                    label="Title model"
+                    description="Model used to name sessions. Empty uses the session’s own model."
+                    htmlFor="sessions-title-model"
+                  >
+                    <input
+                      id="sessions-title-model"
+                      className="settings-input"
+                      value={draft.sessions.titleModel ?? ''}
+                      placeholder="Use the main model"
+                      onChange={(event) => update(['sessions', 'titleModel'], event.target.value || undefined)}
+                    />
+                  </SettingStack>
+                </SettingsGroup>
+              </Disclosure>
+
+              <SettingsGroup title="Saved sessions" meta={`${data.sessions.length}`}>
+                {data.sessions.length === 0 ? (
+                  <div className="settings-row"><p className="settings-empty-inline">No saved sessions yet.</p></div>
+                ) : (
+                  data.sessions.map((session) => (
+                    <SettingRow
+                      key={session.id}
+                      label={
+                        <>
+                          {session.title || session.preview || session.id}
+                          {session.id === sessionId && <span className="settings-tag settings-tag-accent">Current</span>}
+                        </>
+                      }
+                      description={`${session.messageCount} msgs · ${formatWhen(session.updatedAt)}`}
+                    >
+                      <div className="settings-inline-actions">
+                        <button className="button settings-btn-sm" type="button" onClick={async () => { await api('resume-session', { chatId, id: session.id }); onSessionChange(session.id) }}>Open</button>
+                        {session.backend?.kind !== 'command-code' && (
+                          <button className="button button-icon settings-btn-icon" type="button" title="Export markdown" aria-label="Export session" onClick={() => void exportSession(session.id)}><Icon name="download" size={14} /></button>
+                        )}
+                        {session.id === sessionId
+                          ? session.backend?.kind !== 'command-code' && (
+                            <button className="button settings-btn-sm" type="button" onClick={async () => { await api('clear-session', { chatId }); await load(); setNotice({ text: 'Session cleared.', error: false }) }}>Clear</button>
+                          )
+                          : (
+                            <button className="button danger button-icon settings-btn-icon" type="button" title="Delete session" aria-label="Delete session" onClick={() => void deleteSession(session.id)}><Icon name="trash" size={14} /></button>
+                          )}
+                      </div>
+                    </SettingRow>
+                  ))
+                )}
+              </SettingsGroup>
+            </div>
+          </Section>
+
+          {/* ── Gateways ─────────────────────────────────────────────── */}
+          <Section title="Gateways" description="Connect Telegram or Discord to talk to Milo from chat apps." active={current === 'gateways'}>
+            <div className="settings-groups-stack">
+              {(['telegram', 'discord'] as const).map((gateway) => {
+                const name = gateway === 'telegram' ? 'Telegram' : 'Discord'
+                const enabled = Boolean(draft.gateways[gateway]?.enabled)
+                return (
+                  <SettingsGroup key={gateway} title={name} meta={enabled ? 'Enabled' : 'Off'}>
+                    <SettingRow
+                      label={`Enable ${name}`}
+                      description={`Add your ${name} bot token under API keys.`}
+                    >
+                      <Switch
+                        label={`Enable ${name}`}
+                        checked={enabled}
+                        onChange={(next) => update(['gateways', gateway], { enabled: next, allowlist: draft.gateways[gateway]?.allowlist ?? [] })}
+                      />
+                    </SettingRow>
+                    <SettingStack
+                      label="Allowed people"
+                      description="Comma-separated usernames or IDs. Leave empty to allow anyone who finds the bot."
+                      htmlFor={`gateway-${gateway}-allow`}
+                    >
+                      <input
+                        id={`gateway-${gateway}-allow`}
+                        className="settings-input"
+                        placeholder="Anyone"
+                        value={(draft.gateways[gateway]?.allowlist ?? []).join(', ')}
+                        onChange={(event) => update(['gateways', gateway], { enabled, allowlist: splitNames(event.target.value) })}
+                      />
+                    </SettingStack>
+                  </SettingsGroup>
+                )
+              })}
+            </div>
+          </Section>
+
+          {/* ── Web ──────────────────────────────────────────────────── */}
+          <Section title="Web" description="Where this web interface listens when served by Milo." active={current === 'web'}>
+            <SettingsGroup
+              title="Server"
+              footer="Binding outside loopback (127.0.0.1) exposes Milo on your network, protected only by the URL token."
+            >
+              <SettingRow
+                label="Serve with milo serve"
+                badge={<span className="settings-tag">Restart</span>}
+                description="Start the web UI alongside your chat gateways."
+              >
+                <Switch
+                  label="Serve it with milo serve"
+                  checked={draft.web.enabled}
+                  onChange={(next) => update(['web', 'enabled'], next)}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Bind address"
+                description="Network interface to listen on."
+                htmlFor="web-host"
+              >
+                <input
+                  id="web-host"
+                  className="settings-input settings-input-md"
+                  value={draft.web.host}
+                  onChange={(event) => update(['web', 'host'], event.target.value)}
+                  placeholder="127.0.0.1"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Port"
+                description="TCP port (0–65535)."
+                htmlFor="web-port"
+              >
+                <input
+                  id="web-port"
+                  className="settings-input settings-input-num"
+                  type="number"
+                  min="0"
+                  max="65535"
+                  value={draft.web.port}
+                  onChange={(event) => update(['web', 'port'], Number(event.target.value))}
+                />
+              </SettingRow>
+            </SettingsGroup>
+          </Section>
+
         </div>
-        {sectionDirty && <div className="settings-save">
-          <div className="save-actions"><button className="button" type="button" disabled={saving} onClick={discardCurrent}>Discard</button>
-          <button className="button primary" type="button" disabled={saving} onClick={() => void saveCurrent()}>{saving ? 'Saving…' : 'Save changes'}</button></div>
-        </div>}
+        {sectionDirty && (
+          <div className="settings-save">
+            <span className="settings-save-status">
+              <span className="settings-index-dirty-dot" />
+              Unsaved changes
+            </span>
+            <div className="save-actions">
+              <button className="button settings-btn-sm" type="button" disabled={saving} onClick={discardCurrent}>Discard</button>
+              <button className="button primary settings-btn-sm" type="button" disabled={saving} onClick={() => void saveCurrent()}>{saving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </div>
+        )}
       </div>}
     </div>}
   </div>
 }
 
-/** What a section holds right now, in a few words, for its row in the index. */
-function summarize(id: string, draft: SettingsConfig, data: SettingsData, theme: string): string {
-  const keys = Object.values(data.auth).reduce((total, group) => total + Object.values(group).filter((entry) => entry.set).length, 0)
-  const gateways = Object.entries(draft.gateways).filter(([, gateway]) => gateway.enabled).map(([name]) => name)
-  switch (id) {
-    case 'provider': return `${data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider} · ${draft.model}`
-    case 'keys': return keys === 0 ? 'None set' : `${keys} set`
-    case 'memory': return `${data.memoryStats.facts} fact${data.memoryStats.facts === 1 ? '' : 's'}`
-    case 'gateways': return gateways.length === 0 ? 'Off' : gateways.join(', ')
-    case 'web': return draft.web.enabled ? `${draft.web.host}:${draft.web.port}` : 'Off'
-    case 'tools': return `Search ${SEARCH_LABELS[draft.search?.provider ?? 'off']} · Browser ${draft.browser.enabled ? 'on' : 'off'} · Computer Use ${draft.computer?.enabled ? 'on' : 'off'}`
-    case 'permissions': return PERMISSION_LABELS[draft.permissions.mode]
-    case 'display': return theme === 'system' ? 'System theme' : theme === 'dark' ? 'Dark theme' : 'Light theme'
-    case 'skills': return `${data.skills.length} installed`
-    default: return `${data.sessions.length} saved`
-  }
-}
-
 /**
- * The sections as a list: a column beside the one that is open on a wide screen, and
- * the whole screen on a phone, where picking a row opens that section by itself.
- * It is the one place that leaves Settings, so the way back lives in its head.
+ * The sections as a grouped list: a calm column beside the active section on wide
+ * screens, and the full-screen index on a phone. Each row carries only its mark and
+ * its name — never a duplicate preview of what is configured inside.
  */
-function SettingsIndex({ current, summary, isDirty, onSelect, onBack, children }: {
+function SettingsIndex({ current, isDirty, onSelect, onBack, children }: {
   current: string | null
-  summary(id: string): string
   isDirty(id: string): boolean
   onSelect(id: string): void
   onBack(): void
   children?: ReactNode
 }) {
+  const byId = new Map<string, (typeof settingsSections)[number]>(settingsSections.map((entry) => [entry[0], entry]))
   return <nav className="settings-index" aria-label="Settings sections">
     <header className="settings-index-head">
       <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={onBack}><Icon name="arrow-left" size={17} /></button>
       <h1>Settings</h1>
     </header>
     {children}
-    <div className="settings-index-list">
-      {settingsSections.map(([id, icon, label]) => {
-        const dirty = isDirty(id)
-        return <button
-          type="button"
-          key={id}
-          className={`settings-index-row${current === id ? ' active' : ''}`}
-          aria-current={current === id ? 'page' : undefined}
-          onClick={() => onSelect(id)}
-        >
-          <Icon name={icon} size={18} />
-          <span className="settings-index-text">
-            <span className="settings-index-label-row">
-              <span className="settings-index-label">{label}</span>
-              {dirty && <span className="settings-index-dirty-dot" title="Unsaved changes" />}
-            </span>
-            <span className="settings-index-summary">{summary(id)}</span>
-          </span>
-          <Icon name="chevron" size={15} />
-        </button>
-      })}
+    <div className="settings-index-groups">
+      {settingsSectionGroups.map((group) => (
+        <div className="settings-index-group" key={group.label}>
+          <div className="settings-index-group-label">{group.label}</div>
+          <div className="settings-index-list">
+            {group.ids.map((id) => {
+              const entry = byId.get(id)
+              if (!entry) return null
+              const [, icon, label] = entry
+              const dirty = isDirty(id)
+              return (
+                <button
+                  type="button"
+                  key={id}
+                  className={`settings-index-row${current === id ? ' active' : ''}`}
+                  aria-current={current === id ? 'page' : undefined}
+                  onClick={() => onSelect(id)}
+                >
+                  <Icon name={icon} size={17} />
+                  <span className="settings-index-label">{label}</span>
+                  {dirty && <span className="settings-index-dirty-dot" title="Unsaved changes" />}
+                  <Icon className="settings-index-chevron" name="chevron" size={15} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   </nav>
-}
-
-/** The settings most people never change, folded away so the ones that matter read first. */
-function Advanced({ children }: { children: ReactNode }) {
-  return <details className="settings-advanced">
-    <summary>Advanced</summary>
-    <div className="settings-advanced-body">{children}</div>
-  </details>
 }
 
 function Section({ title, description, active = false, children }: { title: string; description: string; active?: boolean; children: ReactNode }) {
   const headingId = `settings-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   return <section className="settings-section" hidden={!active} aria-labelledby={headingId}>
-    <div className="panel-head"><h2 id={headingId}>{title}</h2><p>{description}</p></div>
-    <div className="panel-body">{children}</div>
+    <header className="settings-section-head">
+      <h2 id={headingId}>{title}</h2>
+      <p>{description}</p>
+    </header>
+    <div className="settings-section-body">{children}</div>
   </section>
 }
 
@@ -1173,7 +1811,6 @@ function JobLog({ job, onClose }: { job: JobView; onClose(): void }) {
   </div>
 }
 
-/** Polls a long-running setup job until it ends. */
 function useJob(onFinished: () => void): { job: JobView | null; run(kind: string, body: Record<string, unknown>): Promise<void>; clear(): void } {
   const [job, setJob] = useState<JobView | null>(null)
   const timer = useRef<number | null>(null)

@@ -8,10 +8,9 @@ import { previewTurn, type PreviewTools } from './preview-turn.js'
  * how much of a tool call is drawn, and whether a thought opens or arrives folded.
  */
 export function DisplayPreview({ tools, thinking }: { tools: PreviewTools; thinking: ThinkingDisplay }) {
-  return <>
-    <h3 className="section-label">Preview</h3>
+  return (
     <div className="settings-preview">
       <MessageList messages={previewTurn(tools)} thinking={thinking} />
     </div>
-  </>
+  )
 }
