@@ -245,7 +245,7 @@ export class McpClient {
     // event, and the exit's own words would otherwise replace "no such command".
     if (!this.failure) this.failure = error
     const reported = this.failure
-    for (const [, pending] of this.pending) {
+    for (const pending of [...this.pending.values()]) {
       clearTimeout(pending.timer)
       pending.reject(reported)
     }
@@ -281,8 +281,6 @@ export class McpClient {
       logDebug(`mcp:${this.options.name} answered ${message.id} after it was given up on.`)
       return
     }
-    this.pending.delete(String(message.id))
-    clearTimeout(pending.timer)
     if (message.error) {
       pending.reject(
         new JsonRpcCallError(message.error.code, `${message.error.message} (${pending.method})`, message.error.data),
@@ -308,7 +306,7 @@ export class McpClient {
     method: string,
     params: Record<string, unknown> | undefined,
     timeoutMs: number,
-    options: { meta?: boolean; signal?: AbortSignal } = {},
+    options: { meta?: boolean; signal?: AbortSignal; cancelOnTimeout?: boolean } = {},
   ): Promise<unknown> {
     if (this.failure) return Promise.reject(this.failure)
     // `_meta` is the modern era's. A dual-era server reads its presence as "this
@@ -325,33 +323,46 @@ export class McpClient {
     }
 
     return new Promise<unknown>((resolve, reject) => {
-      const settle = (error: Error | null, value?: unknown): void => {
+      let sent = false
+      const settle = (error: Error | null, value?: unknown, cancelReason?: string): void => {
         const pending = this.pending.get(key)
         if (!pending) return
         this.pending.delete(key)
         clearTimeout(pending.timer)
         options.signal?.removeEventListener('abort', onAbort)
+        if (cancelReason && sent) {
+          // The spec's cancellation: the server is told which request died, so it
+          // can stop the work instead of finishing into a pipe nobody reads.
+          this.notify('notifications/cancelled', { requestId: id, reason: cancelReason })
+        }
         if (error) reject(error)
         else resolve(value)
       }
       const onAbort = (): void => {
-        // The spec's cancellation: the server is told which request died, so it
-        // can stop the work instead of finishing into a pipe nobody reads.
-        this.notify('notifications/cancelled', { requestId: id, reason: 'the turn was stopped' })
         const error = new Error(`${method} was stopped.`)
         error.name = 'AbortError'
-        settle(error)
+        settle(error, undefined, 'the turn was stopped')
       }
       const timer = setTimeout(() => {
-        settle(new Error(`mcp server "${this.options.name}" did not answer ${method} within ${timeoutMs}ms.`))
+        settle(
+          new Error(`mcp server "${this.options.name}" did not answer ${method} within ${timeoutMs}ms.`),
+          undefined,
+          options.cancelOnTimeout ? `timed out after ${timeoutMs}ms` : undefined,
+        )
       }, timeoutMs)
       timer.unref()
-      this.pending.set(key, { method, resolve, reject, timer })
+      this.pending.set(key, {
+        method,
+        resolve: (value) => settle(null, value),
+        reject: (error) => settle(error),
+        timer,
+      })
       if (options.signal?.aborted) {
         onAbort()
         return
       }
       options.signal?.addEventListener('abort', onAbort, { once: true })
+      sent = true
       this.write(message)
     })
   }
@@ -447,7 +458,7 @@ export class McpClient {
       'tools/call',
       { name, arguments: args ?? {} },
       this.server.timeoutMs,
-      { signal },
+      { signal, cancelOnTimeout: true },
     )
     assertComplete(result, `tools/call (${this.options.name}/${name})`)
     return result

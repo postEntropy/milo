@@ -200,9 +200,18 @@ describe('an MCP server over stdio', () => {
     }
   })
 
-  it('gives up on a call the server never answers, and says how long it waited', async () => {
+  it('gives up on a call the server never answers, says how long it waited, and cancels it once', async () => {
     writeServers({
-      fixture: server({ MCP_TOOLS: JSON.stringify([{ name: 'hang', description: 'Never answers.' }]) }, { timeoutMs: 300 }),
+      fixture: server(
+        {
+          MCP_TOOLS: JSON.stringify([
+            { name: 'hang', description: 'Never answers.' },
+            { name: 'cancelled', description: 'Lists received cancellations.' },
+            { name: 'echo', description: 'Echo the arguments back.' },
+          ]),
+        },
+        { timeoutMs: 150 },
+      ),
     })
     const manager = createMcpServers(cwd)
     try {
@@ -211,20 +220,66 @@ describe('an MCP server over stdio', () => {
       await manager.check('fixture')
       const result = await registry.execute('mcp__fixture__hang', {}, context())
       expect(result.isError).toBe(true)
-      expect(result.content).toMatch(/did not answer tools\/call within 300ms/)
+      expect(result.content).toMatch(/did not answer tools\/call within 150ms/)
+      const check = await registry.execute('mcp__fixture__cancelled', {}, context())
+      const cancellations = JSON.parse(check.content) as Array<{
+        requestId: number | null
+        reason: string | null
+      }>
+      expect(cancellations).toHaveLength(1)
+      expect(cancellations[0]?.reason).toBe('timed out after 150ms')
+      expect(typeof cancellations[0]?.requestId).toBe('number')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const again = JSON.parse((await registry.execute('mcp__fixture__cancelled', {}, context())).content)
+      expect(again).toHaveLength(1)
+      const after = await registry.execute('mcp__fixture__echo', { ok: true }, context())
+      expect(after.content).toContain('echo {"ok":true}')
     } finally {
       await manager.close()
     }
   })
 
-  it('abandons a call when the turn stops', async () => {
+  it('finishes a normal response before the timeout without sending notifications/cancelled', async () => {
     writeServers({
-      fixture: server({
-        MCP_TOOLS: JSON.stringify([
-          { name: 'hang', description: 'Never answers.' },
-          { name: 'echo', description: 'Echo the arguments back.' },
-        ]),
-      }),
+      fixture: server(
+        {
+          MCP_TOOLS: JSON.stringify([
+            { name: 'slow', description: 'Answers shortly.' },
+            { name: 'cancelled', description: 'Lists received cancellations.' },
+          ]),
+        },
+        { timeoutMs: 200 },
+      ),
+    })
+    const manager = createMcpServers(cwd)
+    try {
+      const registry = new ToolRegistry()
+      manager.register(registry)
+      await manager.check('fixture')
+      const result = await registry.execute('mcp__fixture__slow', { delayMs: 20 }, context())
+      expect(result.isError).toBeUndefined()
+      expect(result.content).toBe('finished in time')
+      // Wait past the original timeoutMs window to confirm the timer was cleared and never notifies.
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      const check = JSON.parse((await registry.execute('mcp__fixture__cancelled', {}, context())).content)
+      expect(check).toEqual([])
+    } finally {
+      await manager.close()
+    }
+  })
+
+  it('abandons a call when the turn stops and sends notifications/cancelled once', async () => {
+    writeServers({
+      fixture: server(
+        {
+          MCP_TOOLS: JSON.stringify([
+            { name: 'hang', description: 'Never answers.' },
+            { name: 'cancelled', description: 'Lists received cancellations.' },
+            { name: 'echo', description: 'Echo the arguments back.' },
+          ]),
+        },
+        { timeoutMs: 150 },
+      ),
     })
     const manager = createMcpServers(cwd)
     try {
@@ -233,10 +288,19 @@ describe('an MCP server over stdio', () => {
       await manager.check('fixture')
       const controller = new AbortController()
       const call = registry.execute('mcp__fixture__hang', {}, context(controller.signal))
+      await new Promise((resolve) => setTimeout(resolve, 25))
       controller.abort()
       const result = await call
       expect(result.isError).toBe(true)
       expect(result.content).toMatch(/was stopped/)
+      // Wait past timeoutMs to confirm expiry does not send a second cancellation.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      const cancellations = JSON.parse((await registry.execute('mcp__fixture__cancelled', {}, context())).content) as Array<{
+        requestId: number | null
+        reason: string | null
+      }>
+      expect(cancellations).toHaveLength(1)
+      expect(cancellations[0]?.reason).toBe('the turn was stopped')
       // The connection is still usable after one call was abandoned.
       const after = await registry.execute('mcp__fixture__echo', { again: true }, context())
       expect(after.content).toContain('echo {"again":true}')

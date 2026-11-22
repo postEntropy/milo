@@ -60,6 +60,7 @@ const bad = (id, code, message, data) =>
 const delayMs = Number(process.env.MCP_DELAY_MS ?? '0')
 let initialized = false
 let listings = 0
+const cancelled = []
 /** Set while a tool call is waiting for Milo to answer a request the server made. */
 let waitingForReply = null
 
@@ -106,7 +107,11 @@ function dispatch(message) {
     onReply(message)
     return
   }
-  if (method === 'notifications/initialized' || method === 'notifications/cancelled') return
+  if (method === 'notifications/initialized') return
+  if (method === 'notifications/cancelled') {
+    cancelled.push({ requestId: params?.requestId ?? null, reason: params?.reason ?? null })
+    return
+  }
 
   if (method === 'server/discover') {
     if (era === 'refuse-modern') {
@@ -171,6 +176,17 @@ function dispatch(message) {
     const name = params?.name
     const meta = params?._meta ? 'yes' : 'no'
     if (name === 'hang') return
+    if (name === 'slow') {
+      const wait = Number(params?.arguments?.delayMs ?? 20)
+      setTimeout(() => {
+        ok(id, { resultType: 'complete', content: [{ type: 'text', text: 'finished in time' }], isError: false })
+      }, wait)
+      return
+    }
+    if (name === 'cancelled') {
+      ok(id, { resultType: 'complete', content: [{ type: 'text', text: JSON.stringify(cancelled) }] })
+      return
+    }
     if (name === 'boom') {
       ok(id, { resultType: 'complete', content: [{ type: 'text', text: 'the tool went wrong' }], isError: true })
       return
