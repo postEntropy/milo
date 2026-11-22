@@ -791,35 +791,122 @@ struct ToolChain: View {
 /// and no line of its own stands between the call and the answer.
 struct ToolRow: View {
     let tool: ToolMark
+    @Environment(AppModel.self) private var model
     @State private var showingResult = false
+    @State private var showingDrawer = false
 
     var body: some View {
+        let bot = taskBotInfo
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             if canOpen {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
+                    if bot != nil {
+                        showingDrawer = true
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
+                    }
                 } label: {
-                    line
+                    header
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
-                .accessibilityLabel(showingResult ? detailHiddenLabel : detailLabel)
+                .accessibilityLabel(bot != nil ? detailLabel : (showingResult ? detailHiddenLabel : detailLabel))
 
-                if showingResult {
+                if bot == nil && showingResult {
                     if let change = tool.change, !change.isEmpty {
                         changeBody(change)
                     } else {
                         toolDetailBody(input: tool.input, output: tool.result)
                     }
+                    if let preview = tool.preview {
+                        ToolPreviewView(preview: preview, callId: tool.callId)
+                    }
                 }
             } else {
-                line
+                header
             }
         }
         // A call changing state — running to kept, or to failed — is drawn as a change and not
         // a swap: the mark's colour, and the sweep handing over to the settled line.
         .animation(.easeInOut(duration: 0.22), value: tool.state)
+        .sheet(isPresented: $showingDrawer) {
+            if let bot = taskBotInfo {
+                TaskBotDetailSheet(
+                    tool: tool,
+                    botAvatar: bot.avatar,
+                    botName: bot.name,
+                    subtitle: taskSubtitle(botName: bot.name)
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if let bot = taskBotInfo {
+            taskBotCard(avatar: bot.avatar, name: bot.name)
+        } else {
+            line
+        }
+    }
+
+    private func taskBotCard(avatar: CrewAvatarModel, name botName: String) -> some View {
+        let subtitle = taskSubtitle(botName: botName)
+        return HStack(alignment: subtitle.isEmpty ? .center : .top, spacing: MiloTheme.Space.three) {
+            CrewBotAvatar(avatar: avatar, state: tool.state, size: 28, animated: running)
+                .padding(.top, subtitle.isEmpty ? 0 : 1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: MiloTheme.Space.two) {
+                    if running && subtitle.isEmpty {
+                        Glare(text: botName, font: MiloTheme.Text.base.weight(.semibold), tone: MiloTheme.foreground)
+                            .lineLimit(1)
+                    } else {
+                        Text(botName)
+                            .font(MiloTheme.Text.base.weight(.semibold))
+                            .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Spacer(minLength: MiloTheme.Space.two)
+
+                    if failed {
+                        Text("failed")
+                            .font(MiloTheme.Text.meta.weight(.semibold))
+                            .foregroundStyle(MiloTheme.danger)
+                    }
+                    if canOpen {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                    }
+                }
+
+                if !subtitle.isEmpty {
+                    if running {
+                        Glare(text: subtitle, font: MiloTheme.Text.small, tone: MiloTheme.mutedStrong)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(subtitle)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, MiloTheme.Space.four)
+        .padding(.vertical, MiloTheme.Space.three)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .miloGlassCard(radius: MiloTheme.Radius.lg, interactive: canOpen)
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
     }
 
     private var line: some View {
@@ -827,8 +914,8 @@ struct ToolRow: View {
             // The mark is the state: quiet at rest, accent for the call running now, red
             // on a failure — and the word beside it says the failure for whoever cannot
             // see the colour.
-            if let botAvatar = taskBotAvatar {
-                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 24, animated: running)
+            if let bot = taskBotInfo {
+                CrewBotAvatar(avatar: bot.avatar, state: tool.state, size: 24, animated: running)
             } else if tool.name == "crew" || tool.name == "delegated_work" {
                 CrewDrawerMark()
                     .foregroundStyle(state)
@@ -856,7 +943,7 @@ struct ToolRow: View {
                         .font(MiloTheme.Text.body)
                         .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(value.contains("/") ? .middle : .tail)
                 }
                 // How much the call moved, in the same two tones the Work screen counts a
                 // folder's changes with: read on the line, before the fold is opened.
@@ -968,7 +1055,7 @@ struct ToolRow: View {
         return nil
     }
 
-    private var taskBotAvatar: CrewAvatarModel? {
+    private var taskBotInfo: (avatar: CrewAvatarModel, name: String)? {
         guard tool.name == "task" else { return nil }
         if let result = tool.result, result.hasPrefix("Crew bot ") {
             let rest = String(result.dropFirst(9))
@@ -982,21 +1069,35 @@ struct ToolRow: View {
                        close == prefix.index(before: prefix.endIndex) {
                         let botName = String(prefix[..<open]).trimmingCharacters(in: .whitespaces)
                         let botId = String(prefix[prefix.index(after: open)..<close]).trimmingCharacters(in: .whitespaces)
-                        if !botName.isEmpty { return .fromSeed(id: botId.isEmpty ? botName : botId, name: botName) }
+                        if !botName.isEmpty { return (.fromSeed(id: botId.isEmpty ? botName : botId, name: botName), botName) }
                     }
                     let botName = prefix.trimmingCharacters(in: .whitespaces)
-                    if !botName.isEmpty { return .fromSeed(id: readInputField("botId") ?? botName, name: botName) }
+                    if !botName.isEmpty { return (.fromSeed(id: readInputField("botId") ?? botName, name: botName), botName) }
                 }
             }
         }
         let inputName = readInputField("name")
         let inputBotId = readInputField("botId")
         if let inputName {
-            return .fromSeed(id: inputBotId ?? inputName, name: inputName)
+            return (.fromSeed(id: inputBotId ?? inputName, name: inputName), inputName)
         }
         let stripped = tool.text.replacingOccurrences(of: "^Task\\s+", with: "", options: .regularExpression)
         let botName = stripped.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return botName.isEmpty ? nil : .fromSeed(id: inputBotId ?? botName, name: botName)
+        return botName.isEmpty ? nil : (.fromSeed(id: inputBotId ?? botName, name: botName), botName)
+    }
+
+    private func taskSubtitle(botName: String) -> String {
+        let stripped = tool.text
+            .replacingOccurrences(of: "^Task\\s+", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let separator = stripped.range(of: " · ") {
+            let after = String(stripped[separator.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !after.isEmpty { return after }
+        }
+        if !stripped.isEmpty, stripped.caseInsensitiveCompare(botName) != .orderedSame {
+            return stripped
+        }
+        return readInputField("goal") ?? readInputField("task") ?? ""
     }
 
     /// Whether there is anything under the call to open: the lines it changed, or what it
@@ -1005,6 +1106,7 @@ struct ToolRow: View {
     private var hasDetail: Bool {
         if let input = tool.input, !input.isEmpty { return true }
         if let change = tool.change, !change.isEmpty { return true }
+        if tool.preview != nil { return true }
         return !(tool.result?.isEmpty ?? true)
     }
 
@@ -1064,6 +1166,243 @@ struct ToolRow: View {
     }
 }
 
+/// Detail drawer for a delegated Crew bot/subagent task opened from a `ToolRow` card.
+private struct TaskBotDetailSheet: View {
+    let tool: ToolMark
+    let botAvatar: CrewAvatarModel
+    let botName: String
+    let subtitle: String
+    @Environment(\.dismiss) private var dismiss
+
+    private var running: Bool { tool.state == "running" }
+    private var failed: Bool { tool.state == "failed" }
+
+    var body: some View {
+        DetailSheet {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                HStack(alignment: .center, spacing: MiloTheme.Space.three) {
+                    CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 44, animated: running)
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        Text(botName)
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                        statusBadge
+                    }
+                    Spacer(minLength: MiloTheme.Space.two)
+                    MiloIconButton(systemName: "xmark", size: 15, span: 38, glass: true) {
+                        dismiss()
+                    }
+                    .accessibilityLabel("Close")
+                }
+
+                if let parsed = parsedInput {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        Text("Task")
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(MiloTheme.muted)
+                            .padding(.horizontal, MiloTheme.Space.one)
+
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            if let title = parsed.title {
+                                Text(title)
+                                    .font(MiloTheme.Text.body.weight(.semibold))
+                                    .foregroundStyle(MiloTheme.foreground)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let prompt = parsed.prompt {
+                                Prose(text: prompt)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if !parsed.extras.isEmpty {
+                                VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                                    ForEach(Array(parsed.extras.enumerated()), id: \.offset) { _, extra in
+                                        HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
+                                            Text(extra.key)
+                                                .font(MiloTheme.Text.small.weight(.medium))
+                                                .foregroundStyle(MiloTheme.muted)
+                                            Text(extra.value)
+                                                .font(MiloTheme.Text.small)
+                                                .foregroundStyle(MiloTheme.mutedStrong)
+                                                .textSelection(.enabled)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(MiloTheme.Space.four)
+                        .miloGlassCard(radius: MiloTheme.Radius.xl)
+                    }
+                } else if let taskPrompt = displayedTaskText {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        Text("Task")
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(MiloTheme.muted)
+                            .padding(.horizontal, MiloTheme.Space.one)
+
+                        Prose(text: taskPrompt)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(MiloTheme.Space.four)
+                            .miloGlassCard(radius: MiloTheme.Radius.xl)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    Text("Response")
+                        .font(MiloTheme.Text.small.weight(.semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .padding(.horizontal, MiloTheme.Space.one)
+
+                    Group {
+                        if let output = cleanedOutput, !output.isEmpty {
+                            Prose(text: output)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if running {
+                            Glare(text: "Working on this task…", font: MiloTheme.Text.body, tone: MiloTheme.mutedStrong)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text("No output is available.")
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(MiloTheme.Space.four)
+                    .miloGlassCard(radius: MiloTheme.Radius.xl)
+                }
+
+                if let preview = tool.preview {
+                    ToolPreviewView(preview: preview, callId: tool.callId)
+                }
+            }
+        }
+    }
+
+    private var statusBadge: some View {
+        let tone = failed ? MiloTheme.danger : (running ? MiloTheme.accent : MiloTheme.success)
+        let label = failed ? "Failed" : (running ? "Running" : "Completed")
+        return HStack(spacing: MiloTheme.Space.one) {
+            Circle()
+                .fill(tone)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(MiloTheme.Text.small.weight(.semibold))
+                .foregroundStyle(tone)
+        }
+        .padding(.horizontal, MiloTheme.Space.three)
+        .padding(.vertical, MiloTheme.Space.one)
+        .background(tone.opacity(0.14), in: Capsule())
+    }
+
+    private struct ParsedTaskInput {
+        var title: String?
+        var prompt: String?
+        var extras: [(key: String, value: String)]
+    }
+
+    private var parsedInput: ParsedTaskInput? {
+        Self.parseTaskInput(tool.input, fallbackTitle: subtitle)
+    }
+
+    private static func parseTaskInput(_ raw: String?, fallbackTitle: String) -> ParsedTaskInput? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        var entries: [(key: String, value: String)] = []
+        var currentKey: String?
+        var currentLines: [String] = []
+
+        func flush() {
+            guard let key = currentKey else { return }
+            let joined = currentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty {
+                entries.append((key: key, value: joined))
+            }
+            currentKey = nil
+            currentLines = []
+        }
+
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let isIndented = line.hasPrefix(" ") || line.hasPrefix("\t")
+            if !isIndented, let colon = line.firstIndex(of: ":") {
+                let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+                let afterColon = String(line[line.index(after: colon)...])
+                let validKey = !key.isEmpty && !key.contains(where: \.isWhitespace)
+                let validValueSeparator = afterColon.isEmpty || afterColon.hasPrefix(" ")
+                if validKey && validValueSeparator {
+                    flush()
+                    currentKey = key
+                    let inlineValue = afterColon.trimmingCharacters(in: .whitespaces)
+                    if !inlineValue.isEmpty {
+                        currentLines.append(inlineValue)
+                    }
+                    continue
+                }
+            }
+            if currentKey != nil {
+                if line.hasPrefix("  ") {
+                    currentLines.append(String(line.dropFirst(2)))
+                } else {
+                    currentLines.append(line)
+                }
+            }
+        }
+        flush()
+
+        guard !entries.isEmpty else { return nil }
+        let knownTaskKeys: Set<String> = ["name", "botId", "description", "prompt", "goal", "task"]
+        guard entries.contains(where: { knownTaskKeys.contains($0.key) }) else {
+            return nil
+        }
+
+        var map: [String: String] = [:]
+        for entry in entries where map[entry.key] == nil {
+            map[entry.key] = entry.value
+        }
+
+        let trimmedFallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = map["description"] ?? (trimmedFallback.isEmpty ? nil : trimmedFallback)
+        let prompt = map["prompt"] ?? map["goal"] ?? map["task"]
+        let finalPrompt = (prompt != nil && prompt == title) ? nil : prompt
+        let extras = entries.filter { !knownTaskKeys.contains($0.key) }
+        if title == nil && finalPrompt == nil && extras.isEmpty {
+            return nil
+        }
+        return ParsedTaskInput(title: title, prompt: finalPrompt, extras: extras)
+    }
+
+    private var displayedTaskText: String? {
+        let rawInput = tool.input?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !subtitle.isEmpty {
+            if let rawInput, !rawInput.isEmpty, rawInput != subtitle, rawInput.count > subtitle.count {
+                return rawInput
+            }
+            return subtitle
+        }
+        return rawInput?.isEmpty == false ? rawInput : nil
+    }
+
+    private var cleanedOutput: String? {
+        guard let result = tool.result?.trimmingCharacters(in: .whitespacesAndNewlines), !result.isEmpty else {
+            return nil
+        }
+        // Strip the server's `Crew bot <Name> (<id>):` header line since the sheet header already identifies the bot.
+        if result.hasPrefix("Crew bot "), let newline = result.firstIndex(of: "\n") {
+            let firstLine = String(result[..<newline])
+            if firstLine.hasSuffix(":") {
+                let rest = String(result[result.index(after: newline)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !rest.isEmpty { return rest }
+            }
+        }
+        return result
+    }
+}
+
 /// The project's checks, after a turn that wrote. One filled block, the verdict's
 /// colour on the words — the same block the browser draws.
 struct VerificationRow: View {
@@ -1085,7 +1424,7 @@ struct TodoRow: View {
     let items: [TodoItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
                     Image(systemName: symbol(item.status))
@@ -1093,14 +1432,15 @@ struct TodoRow: View {
                         .foregroundStyle(mark(item.status))
                     Text(item.content)
                         .font(MiloTheme.Text.small)
-                        .foregroundStyle(item.status == "completed" ? MiloTheme.muted : MiloTheme.foreground2)
-                        .strikethrough(item.status == "completed", color: MiloTheme.muted)
+                        .foregroundStyle(item.status == "completed" ? MiloTheme.mutedStrong : MiloTheme.foreground)
+                        .strikethrough(item.status == "completed", color: MiloTheme.mutedStrong)
                 }
             }
         }
-        .padding(MiloTheme.Space.three)
+        .padding(.horizontal, MiloTheme.Space.four)
+        .padding(.vertical, MiloTheme.Space.three)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .miloGlassCard(radius: MiloTheme.Radius.lg)
     }
 
     private func symbol(_ status: String) -> String {
@@ -1115,7 +1455,76 @@ struct TodoRow: View {
         switch status {
         case "completed": return MiloTheme.success
         case "in_progress": return MiloTheme.accent
-        default: return MiloTheme.muted
+        default: return MiloTheme.mutedStrong
+        }
+    }
+}
+
+/// Fetches an ephemeral desktop screenshot thumbnail only while its tool row is expanded.
+private struct ToolPreviewView: View {
+    let preview: ToolPreviewRef
+    let callId: String?
+
+    @Environment(AppModel.self) private var model
+    @State private var state: LoadState = .loading
+
+    private enum LoadState {
+        case loading
+        case ready(UIImage)
+        case expired
+        case decodeFailed
+        case failed
+    }
+
+    var body: some View {
+        Group {
+            switch state {
+            case .ready(let image):
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 320, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            case .expired:
+                Text("Preview expired.")
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            case .decodeFailed:
+                Text("Could not decode preview image.")
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            case .failed:
+                Text("Preview unavailable.")
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            case .loading:
+                Text("Loading preview…")
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            }
+        }
+        .task(id: preview.id) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard let callId, !callId.isEmpty else {
+            state = .failed
+            return
+        }
+        let result = await model.fetchToolPreview(id: preview.id, callId: callId)
+        switch result {
+        case .image(let data):
+            if let image = UIImage(data: data) {
+                state = .ready(image)
+            } else {
+                state = .decodeFailed
+            }
+        case .expired:
+            state = .expired
+        case .unavailable:
+            state = .failed
         }
     }
 }
