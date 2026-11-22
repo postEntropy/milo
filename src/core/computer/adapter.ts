@@ -20,13 +20,23 @@ import type {
   HyprlandPluginState,
   RawWindowState,
 } from './types.js'
+import {
+  HYPRLAND_PLUGIN_PACKAGE,
+  OMARCHY_ACTIVATION_GUIDE,
+  hyprlandPluginLimitation,
+  hyprlandPluginSummaryTag,
+  hyprlandRefusalGuidance,
+} from './setup-help.js'
+
+export {
+  OMARCHY_ACTIVATION_GUIDE,
+  hyprlandPluginLimitation,
+  hyprlandPluginSummaryTag,
+  hyprlandRefusalGuidance,
+}
 
 const execFileAsync = promisify(execFile)
 
-export const OMARCHY_ACTIVATION_GUIDE =
-  'https://github.com/omacom/omarchy-pkgs/blob/master/pkgbuilds/cua-hyprland-plugin/README.md'
-
-const HYPRLAND_PLUGIN_PACKAGE = 'cua-hyprland-plugin'
 const HYPRLAND_PLUGIN_PATHS = [
   '/usr/lib/cua/hyprland/cua-hyprland-plugin.so',
   '/usr/lib/hyprland/cua-hyprland-plugin.so',
@@ -227,6 +237,15 @@ function isHyprlandHost(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): bool
 }
 
 const SUPPORTED_HYPRLAND_INPUT_PROTOCOL = 3
+const INPUT_CAPABILITY_NAMES = new Set([
+  'input',
+  'mutation',
+  'pointer',
+  'keyboard',
+  'synthetic_input',
+  'trusted_input',
+  'background_input',
+])
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -234,7 +253,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function parseCuaStatusJson(raw: string): 'input_available' | 'loaded_disabled' | 'unverified' | null {
+function readNormalizedStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length > 0)
+}
+
+function hasInputCapability(capabilities: string[] | null): boolean {
+  if (!capabilities) return false
+  return capabilities.some((cap) => INPUT_CAPABILITY_NAMES.has(cap))
+}
+
+function parseCuaStatusJson(
+  raw: string,
+):
+  | 'input_available'
+  | 'loaded_discovery_only'
+  | 'loaded_abi_mismatch'
+  | 'loaded_unsupported_protocol'
+  | 'loaded_transport_stopped'
+  | 'loaded_disabled'
+  | 'unverified'
+  | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -262,51 +304,85 @@ function parseCuaStatusJson(raw: string): 'input_available' | 'loaded_disabled' 
   const endpoints = asRecord(rec.endpoints)
   const input = asRecord(rec.input) ?? asRecord(endpoints?.input)
 
-  if (
+  const capabilities = asRecord(rec.capabilities)
+  const supportedCapabilities = readNormalizedStringList(capabilities?.supported)
+  const enabledCapabilities = readNormalizedStringList(capabilities?.enabled)
+  const state = typeof rec.state === 'string' ? rec.state.trim().toLowerCase() : ''
+  const mode = typeof rec.mode === 'string' ? rec.mode.trim().toLowerCase() : ''
+  const discoveryTagged =
+    state === 'discovery_only' ||
+    state === 'discovery-only' ||
+    state === 'discovery' ||
+    mode === 'discovery' ||
+    mode === 'discovery-only'
+
+  // Announced capabilities decide whether the loaded module actually supports background input or only discovery.
+  // Keep top-level `protocol.major` (wire status version) distinct from `input.protocol`.
+  const announcesSupportedCapabilities = supportedCapabilities !== null
+  const inputSupportedByCapabilities = hasInputCapability(supportedCapabilities)
+  const inputEnabledByCapabilities =
+    enabledCapabilities === null ? true : hasInputCapability(enabledCapabilities)
+
+  if (announcesSupportedCapabilities && !inputSupportedByCapabilities) {
+    return 'loaded_discovery_only'
+  }
+
+  if (!announcesSupportedCapabilities && discoveryTagged) {
+    return 'loaded_discovery_only'
+  }
+
+  if (!announcesSupportedCapabilities && !input && asRecord(endpoints?.discovery)) {
+    return 'loaded_discovery_only'
+  }
+
+  // ABI mismatch and unsupported input protocol cannot be resolved by enabling `plugin:cua:enabled`.
+  if (abiMismatch) {
+    return 'loaded_abi_mismatch'
+  }
+
+  const inputState = typeof input?.state === 'string' ? input.state.trim().toLowerCase() : ''
+  const protocolSupported = input?.protocol === SUPPORTED_HYPRLAND_INPUT_PROTOCOL
+  if (input && input.protocol !== undefined && !protocolSupported) {
+    return 'loaded_unsupported_protocol'
+  }
+
+  if (input?.supported === false) {
+    return 'loaded_unsupported_protocol'
+  }
+
+  // Restrict `loaded_disabled` (and its `plugin:cua:enabled` recommendation) strictly to cases where
+  // input compatibility (ABI + v3 protocol evidence in `input`) is confirmed and input is explicitly turned off.
+  const explicitlyDisabled =
     rec.enabled === false ||
     rec.input_enabled === false ||
     rec.configured === false ||
-    abiMismatch ||
-    transportStopped
+    (announcesSupportedCapabilities && inputSupportedByCapabilities && !inputEnabledByCapabilities) ||
+    (input !== null && (input.enabled === false || input.active === false || inputState === 'disabled'))
+
+  if (explicitlyDisabled && abiMatch && protocolSupported && input?.test_only !== true) {
+    return 'loaded_disabled'
+  }
+
+  const inputTransportStopped =
+    input !== null &&
+    (input.transport_ready === false || inputState === 'stopped' || inputState === 'error')
+  if (!explicitlyDisabled && (transportStopped || inputTransportStopped)) {
+    return 'loaded_transport_stopped'
+  }
+
+  if (
+    input &&
+    abiMatch &&
+    transportReady &&
+    input.test_only === false &&
+    protocolSupported &&
+    input.transport_ready === true &&
+    !explicitlyDisabled &&
+    !inputTransportStopped
   ) {
-    return 'loaded_disabled'
+    return 'input_available'
   }
 
-  if (input) {
-    const inputState = typeof input.state === 'string' ? input.state.trim().toLowerCase() : ''
-    const inputDisabled =
-      input.test_only === true ||
-      input.transport_ready === false ||
-      input.enabled === false ||
-      input.active === false ||
-      input.supported === false ||
-      inputState === 'disabled' ||
-      inputState === 'stopped' ||
-      inputState === 'error'
-    const protocolSupported = input.protocol === SUPPORTED_HYPRLAND_INPUT_PROTOCOL
-
-    if (
-      abiMatch &&
-      transportReady &&
-      input.test_only === false &&
-      protocolSupported &&
-      input.transport_ready === true &&
-      !inputDisabled
-    ) {
-      return 'input_available'
-    }
-    if (inputDisabled || (input.protocol !== undefined && !protocolSupported)) {
-      return 'loaded_disabled'
-    }
-    return 'unverified'
-  }
-
-  const mode = typeof rec.mode === 'string' ? rec.mode.trim().toLowerCase() : ''
-  if (mode === 'discovery' || mode === 'discovery-only' || asRecord(endpoints?.discovery)) {
-    return 'loaded_disabled'
-  }
-
-  // `configured: true` alone does not prove ABI match, transport readiness, or active production input.
   return 'unverified'
 }
 
@@ -385,51 +461,6 @@ export async function probeHyprlandPluginStatus(
     }
     return 'unverified'
   }
-}
-
-export function hyprlandPluginSummaryTag(state: HyprlandPluginState): string | null {
-  switch (state) {
-    case 'not_installed':
-      return 'Hyprland plugin not installed'
-    case 'installed_not_loaded':
-      return 'Hyprland plugin installed, not loaded'
-    case 'loaded_disabled':
-      return 'Hyprland plugin loaded, input disabled'
-    case 'input_available':
-      return 'Hyprland input ready'
-    case 'unverified':
-      return 'Hyprland plugin status unverified'
-    case 'not_applicable':
-      return null
-  }
-}
-
-export function hyprlandPluginLimitation(state: HyprlandPluginState): string | null {
-  switch (state) {
-    case 'not_installed':
-      return `Hyprland Cua plugin (${HYPRLAND_PLUGIN_PACKAGE}) is not installed. Background pixel clicks and keyboard input on native Wayland windows require it; window capture and AT-SPI accessibility actions remain available where supported. See the Omarchy activation guide: ${OMARCHY_ACTIVATION_GUIDE}`
-    case 'installed_not_loaded':
-      return `Hyprland Cua plugin is installed but not loaded in the compositor. Load it and enable input for background Wayland input; window capture and AT-SPI accessibility actions remain available where supported. See the Omarchy activation guide: ${OMARCHY_ACTIVATION_GUIDE}`
-    case 'loaded_disabled':
-      return `Hyprland Cua plugin is loaded, but compositor input is disabled. Enable plugin:cua:enabled in Hyprland config and reload; window capture and AT-SPI accessibility actions remain available where supported. See the Omarchy activation guide: ${OMARCHY_ACTIVATION_GUIDE}`
-    case 'unverified':
-      return 'Hyprland Cua plugin status could not be verified via `hyprctl -j cua:status`. Window capture and AT-SPI accessibility actions remain available where supported.'
-    case 'input_available':
-    case 'not_applicable':
-      return null
-  }
-}
-
-export function hyprlandRefusalGuidance(
-  state: HyprlandPluginState | undefined,
-  appName: string,
-  action: string,
-): string | null {
-  if (!state || state === 'not_applicable') return null
-  if (state === 'input_available') {
-    return `The Hyprland Cua plugin is active, but "${appName}" or this "${action}" action lacks a supported background input route. Window capture and AT-SPI accessibility actions remain available where supported.`
-  }
-  return hyprlandPluginLimitation(state)
 }
 
 /**
@@ -947,5 +978,27 @@ export class CuaDriverAdapter implements ComputerDriverAdapter {
         ;(driver as { uniffiDestroy: () => void }).uniffiDestroy()
       }
     }
+  }
+}
+
+/**
+ * Probes host Computer Use capability, reusing the active ComputerManager when enabled
+ * or performing a short-lived CuaDriverAdapter probe when disabled.
+ */
+export async function probeComputerStatus(
+  computer?: {
+    probe(signal?: AbortSignal, options?: { fresh?: boolean }): Promise<ComputerCapabilityStatus>
+  } | null,
+  signal?: AbortSignal,
+  options?: { fresh?: boolean },
+): Promise<ComputerCapabilityStatus> {
+  if (computer) {
+    return computer.probe(signal, options)
+  }
+  const adapter = new CuaDriverAdapter()
+  try {
+    return await adapter.probe(signal)
+  } finally {
+    await adapter.close()
   }
 }

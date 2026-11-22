@@ -4,9 +4,22 @@ export {
   hyprlandPluginSummaryTag,
   hyprlandRefusalGuidance,
   OMARCHY_ACTIVATION_GUIDE,
+  probeComputerStatus,
   probeHyprlandPluginStatus,
 } from './adapter.js'
 export type { CommandProbeFn, HyprlandProbeDeps } from './adapter.js'
+export {
+  COMPUTER_SETUP_HELP_LABEL,
+  computerSetupHelp,
+  computerSetupUnavailableReply,
+  isComputerSetupHelpState,
+  withComputerSetupHelp,
+} from './setup-help.js'
+export type {
+  ComputerSetupHelp,
+  ComputerSetupHelpState,
+  ComputerStatusWithHelp,
+} from './setup-help.js'
 export {
   buildThumbnail,
   ComputerPreviewStore,

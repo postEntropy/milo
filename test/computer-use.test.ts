@@ -6,14 +6,19 @@ import { runAgent } from '../src/core/agent/loop.js'
 import { runSubagent } from '../src/core/agent/subagent.js'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
 import {
+  COMPUTER_SETUP_HELP_LABEL,
   ComputerManager,
   ComputerPreviewStore,
+  computerSetupHelp,
+  computerSetupUnavailableReply,
+  CuaDriverAdapter,
   hyprlandPluginLimitation,
   hyprlandPluginSummaryTag,
   OMARCHY_ACTIVATION_GUIDE,
   PREVIEW_MAX_BYTES,
   PREVIEW_MAX_LONG_EDGE,
   probeHyprlandPluginStatus,
+  withComputerSetupHelp,
   type ComputerActionOutcome,
   type ComputerCapabilityStatus,
   type ComputerDriverAdapter,
@@ -1724,7 +1729,6 @@ describe('Computer Use capability', () => {
     expect(hyprlandPluginSummaryTag(installedNotLoaded)).toBe('Hyprland plugin installed, not loaded')
     expect(hyprlandPluginLimitation(installedNotLoaded)).toContain(OMARCHY_ACTIVATION_GUIDE)
 
-    // 3. Loaded, input disabled — test configured-only, discovery-only, stopped input/outer transport, ABI mismatch, and unknown protocol.
     const readyPayload = {
       configured: true,
       abi: { compiled_hash: 'aaa111', runtime_hash: 'aaa111', match: true },
@@ -1736,11 +1740,47 @@ describe('Computer Use capability', () => {
       },
     }
 
-    const configuredOnly = await probeWith(async () => ({
-      stdout: JSON.stringify({ configured: true }),
+    const kindBison67Status = {
+      name: 'cua-hyprland-plugin',
+      plugin_version: '0.1.0',
+      state: 'discovery_only',
+      protocol: { major: 2, minor: 0, max_frame_bytes: 4120 },
+      compositor_epoch: 0,
+      abi: {
+        compiled_hash: 'efb50993780079460b0cbed1363e2166a2de1d9f_aq_0.15_hu_0.14_hg_0.5_hc_0.1_hlg_0.6',
+        runtime_hash: 'efb50993780079460b0cbed1363e2166a2de1d9f_aq_0.15_hu_0.14_hg_0.5_hc_0.1_hlg_0.6',
+        match: true,
+      },
+      configured: false,
+      transport: { ready: false, socket: '', mode: '0600', peer_policy: 'same_uid', last_error: '' },
+      capabilities: {
+        supported: ['discovery'],
+        enabled: [],
+        mutation: 'disabled_pending_rfc_and_agent_seat',
+      },
+      connections: {
+        accepted: 0,
+        rejected_peers: 0,
+        rejected_busy: 0,
+        timed_out_handshakes: 0,
+        timed_out_idle: 0,
+        malformed_frames: 0,
+      },
+      keyboard_layout_independent: true,
+      foreground_numlock_compatible: true,
+      ime_popup_guard: true,
+    }
+
+    // 3a. Discovery-only module (real kind-bison-67 payload and legacy mode: 'discovery-only'):
+    // Never classify discovery-only modules as loaded_disabled even when configured/transport are false.
+    const kindBisonDiscoveryOnly = await probeWith(async () => ({
+      stdout: JSON.stringify(kindBison67Status),
       stderr: '',
     }))
-    expect(configuredOnly).toBe('unverified')
+    expect(kindBisonDiscoveryOnly).toBe('loaded_discovery_only')
+    expect(hyprlandPluginSummaryTag(kindBisonDiscoveryOnly)).toBe('Hyprland plugin loaded. Background input unavailable.')
+    expect(hyprlandPluginLimitation(kindBisonDiscoveryOnly)).toContain('Hyprland plugin loaded. Background input unavailable.')
+    expect(hyprlandPluginLimitation(kindBisonDiscoveryOnly)).not.toContain('plugin:cua:enabled')
 
     const discoveryOnly = await probeWith(async () => ({
       stdout: JSON.stringify({
@@ -1754,8 +1794,8 @@ describe('Computer Use capability', () => {
       }),
       stderr: '',
     }))
-    expect(discoveryOnly).toBe('loaded_disabled')
-    expect(hyprlandPluginSummaryTag(discoveryOnly)).toBe('Hyprland plugin loaded, input disabled')
+    expect(discoveryOnly).toBe('loaded_discovery_only')
+    expect(hyprlandPluginSummaryTag(discoveryOnly)).toBe('Hyprland plugin loaded. Background input unavailable.')
     expect(hyprlandPluginLimitation(discoveryOnly)).toContain(OMARCHY_ACTIVATION_GUIDE)
 
     const discoveryOnlyNoInput = await probeWith(async () => ({
@@ -1767,11 +1807,67 @@ describe('Computer Use capability', () => {
       }),
       stderr: '',
     }))
-    expect(discoveryOnlyNoInput).toBe('loaded_disabled')
+    expect(discoveryOnlyNoInput).toBe('loaded_discovery_only')
 
+    // 3b. Compatible input explicitly turned off -> loaded_disabled (only case recommending plugin:cua:enabled & reload).
+    const configuredOnly = await probeWith(async () => ({
+      stdout: JSON.stringify({ configured: true }),
+      stderr: '',
+    }))
+    expect(configuredOnly).toBe('unverified')
+
+    const unverifiedAbiDisabled = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        configured: false,
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery'] },
+        input: { test_only: false, protocol: 3, transport_ready: false },
+      }),
+      stderr: '',
+    }))
+    expect(unverifiedAbiDisabled).toBe('unverified')
+
+    const supportedButDisabled = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        ...kindBison67Status,
+        state: 'ready',
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery'] },
+        input: { test_only: false, protocol: 3, transport_ready: false },
+      }),
+      stderr: '',
+    }))
+    expect(supportedButDisabled).toBe('loaded_disabled')
+    expect(hyprlandPluginSummaryTag(supportedButDisabled)).toBe('Hyprland plugin loaded, input disabled')
+    expect(hyprlandPluginLimitation(supportedButDisabled)).toContain('plugin:cua:enabled')
+    expect(hyprlandPluginLimitation(supportedButDisabled)).toContain('reload')
+
+    const supportedButDisabledNoInputBlock = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        abi: { match: true },
+        configured: false,
+        capabilities: { supported: ['discovery', 'input'] },
+      }),
+      stderr: '',
+    }))
+    expect(supportedButDisabledNoInputBlock).toBe('unverified')
+    expect(hyprlandPluginSummaryTag(supportedButDisabledNoInputBlock)).toBe('Hyprland plugin status unverified')
+    expect(hyprlandPluginLimitation(supportedButDisabledNoInputBlock)).not.toContain('plugin:cua:enabled')
+    expect(hyprlandPluginLimitation(supportedButDisabledNoInputBlock)).not.toContain('reload')
+
+    const kindBisonInputCapableNoInputBlock = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        ...kindBison67Status,
+        state: 'ready',
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery'] },
+      }),
+      stderr: '',
+    }))
+    expect(kindBisonInputCapableNoInputBlock).toBe('unverified')
+
+    // 3c. Stopped transport (input enabled/configured, but transport unready/stopped) -> never recommends plugin:cua:enabled.
     const stoppedInputTransport = await probeWith(async () => ({
       stdout: JSON.stringify({
         ...readyPayload,
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery', 'input'] },
         input: {
           ...readyPayload.input,
           transport_ready: false,
@@ -1779,29 +1875,54 @@ describe('Computer Use capability', () => {
       }),
       stderr: '',
     }))
-    expect(stoppedInputTransport).toBe('loaded_disabled')
+    expect(stoppedInputTransport).toBe('loaded_transport_stopped')
+    expect(hyprlandPluginSummaryTag(stoppedInputTransport)).toBe('Hyprland input transport stopped')
+    expect(hyprlandPluginLimitation(stoppedInputTransport)).toContain('transport is stopped')
+    expect(hyprlandPluginLimitation(stoppedInputTransport)).not.toContain('plugin:cua:enabled')
+    expect(hyprlandPluginLimitation(stoppedInputTransport)).not.toContain('reload')
 
     const stoppedOuterTransport = await probeWith(async () => ({
       stdout: JSON.stringify({
         ...readyPayload,
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery', 'input'] },
         transport: { ready: false, state: 'stopped' },
       }),
       stderr: '',
     }))
-    expect(stoppedOuterTransport).toBe('loaded_disabled')
+    expect(stoppedOuterTransport).toBe('loaded_transport_stopped')
 
+    // 3d. ABI mismatch (even when configured: false) -> never recommends plugin:cua:enabled.
     const abiMismatch = await probeWith(async () => ({
       stdout: JSON.stringify({
         ...readyPayload,
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery', 'input'] },
         abi: { compiled_hash: 'aaa111', runtime_hash: 'bbb222', match: false },
       }),
       stderr: '',
     }))
-    expect(abiMismatch).toBe('loaded_disabled')
+    expect(abiMismatch).toBe('loaded_abi_mismatch')
+    expect(hyprlandPluginSummaryTag(abiMismatch)).toBe('Hyprland plugin ABI mismatch')
+    expect(hyprlandPluginLimitation(abiMismatch)).toContain('ABI does not match')
+    expect(hyprlandPluginLimitation(abiMismatch)).not.toContain('plugin:cua:enabled')
+    expect(hyprlandPluginLimitation(abiMismatch)).not.toContain('reload')
 
+    const abiMismatchWhileDisabled = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        ...kindBison67Status,
+        state: 'ready',
+        abi: { compiled_hash: 'aaa111', runtime_hash: 'bbb222', match: false },
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery'] },
+        input: { test_only: false, protocol: 3, transport_ready: false },
+      }),
+      stderr: '',
+    }))
+    expect(abiMismatchWhileDisabled).toBe('loaded_abi_mismatch')
+
+    // 3e. Input protocol other than v3 (even when disabled) -> never recommends plugin:cua:enabled.
     const unknownProtocol = await probeWith(async () => ({
       stdout: JSON.stringify({
         ...readyPayload,
+        protocol: { major: 3, minor: 0 },
         input: {
           ...readyPayload.input,
           protocol: 4,
@@ -1809,11 +1930,52 @@ describe('Computer Use capability', () => {
       }),
       stderr: '',
     }))
-    expect(unknownProtocol).toBe('loaded_disabled')
+    expect(unknownProtocol).toBe('loaded_unsupported_protocol')
+    expect(hyprlandPluginSummaryTag(unknownProtocol)).toBe('Hyprland input protocol unsupported')
+    expect(hyprlandPluginLimitation(unknownProtocol)).toContain('protocol other than v3')
+    expect(hyprlandPluginLimitation(unknownProtocol)).not.toContain('plugin:cua:enabled')
+    expect(hyprlandPluginLimitation(unknownProtocol)).not.toContain('reload')
 
-    // 4. Active production input: matching ABI, ready outer transport, test_only: false, protocol === 3, and input.transport_ready === true.
+    const v2ProtocolWhileDisabled = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        ...readyPayload,
+        configured: false,
+        enabled: false,
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery'] },
+        input: {
+          enabled: false,
+          test_only: false,
+          protocol: 2,
+          transport_ready: false,
+        },
+      }),
+      stderr: '',
+    }))
+    expect(v2ProtocolWhileDisabled).toBe('loaded_unsupported_protocol')
+
+    // Top-level protocol.major: 3 does not substitute for missing input.protocol.
+    const topLevelMajorOnly = await probeWith(async () => ({
+      stdout: JSON.stringify({
+        ...readyPayload,
+        protocol: { major: 3, minor: 0 },
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery', 'input'] },
+        input: {
+          test_only: false,
+          transport_ready: true,
+        },
+      }),
+      stderr: '',
+    }))
+    expect(topLevelMajorOnly).toBe('unverified')
+
+    // 4. Active production input: matching ABI, ready outer transport, test_only: false, input.protocol === 3, and input.transport_ready === true
+    // even when top-level status protocol.major is 2.
     const inputAvailable = await probeWith(async () => ({
-      stdout: JSON.stringify(readyPayload),
+      stdout: JSON.stringify({
+        ...readyPayload,
+        protocol: { major: 2, minor: 0 },
+        capabilities: { supported: ['discovery', 'input'], enabled: ['discovery', 'input'] },
+      }),
       stderr: '',
     }))
     expect(inputAvailable).toBe('input_available')
@@ -1995,5 +2157,231 @@ describe('Computer Use capability', () => {
     })
     expect(acted.ok).toBe(true)
     expect(clickCoordsSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves Ready, capture, and AT-SPI availability during CuaDriverAdapter.probe() for kind-bison-67 discovery-only status', async () => {
+    const prevWayland = process.env.WAYLAND_DISPLAY
+    const prevDisplay = process.env.DISPLAY
+    process.env.WAYLAND_DISPLAY = 'wayland-1'
+    process.env.DISPLAY = ':0'
+    try {
+      const adapter = new CuaDriverAdapter({
+        platform: 'linux',
+        env: { HYPRLAND_INSTANCE_SIGNATURE: 'sig-kind-bison-67' },
+        runCommand: async () => ({
+          stdout: JSON.stringify({
+            name: 'cua-hyprland-plugin',
+            plugin_version: '0.1.0',
+            state: 'discovery_only',
+            protocol: { major: 2, minor: 0, max_frame_bytes: 4120 },
+            compositor_epoch: 0,
+            abi: {
+              compiled_hash: 'efb50993780079460b0cbed1363e2166a2de1d9f_aq_0.15_hu_0.14_hg_0.5_hc_0.1_hlg_0.6',
+              runtime_hash: 'efb50993780079460b0cbed1363e2166a2de1d9f_aq_0.15_hu_0.14_hg_0.5_hc_0.1_hlg_0.6',
+              match: true,
+            },
+            configured: false,
+            transport: { ready: false, socket: '', mode: '0600', peer_policy: 'same_uid', last_error: '' },
+            capabilities: {
+              supported: ['discovery'],
+              enabled: [],
+              mutation: 'disabled_pending_rfc_and_agent_seat',
+            },
+          }),
+          stderr: '',
+        }),
+      })
+      const fakeDriver = {
+        isAvailable: () => true,
+        metadata: async () => ({ driverVersion: '0.56.4' }),
+        callTool: async (name: string) => {
+          if (name === 'check_permissions') {
+            return {
+              structuredJson: JSON.stringify({
+                atspi: true,
+                wayland_enabled: true,
+                xsend_event: false,
+              }),
+            }
+          }
+          if (name === 'health_report') {
+            return {
+              structuredJson: JSON.stringify({
+                checks: [
+                  { name: 'ax_capability', status: 'pass' },
+                  { name: 'screen_capture_capability', status: 'pass' },
+                  { name: 'wayland_backend', status: 'pass', message: 'virtual-pointer=false' },
+                ],
+              }),
+            }
+          }
+          return { structuredJson: '{}' }
+        },
+      }
+      Object.assign(adapter as unknown as Record<string, unknown>, {
+        sdk: { CuaDriver: { create: () => fakeDriver } },
+        driver: fakeDriver,
+      })
+
+      const status = await adapter.probe()
+      expect(status.available).toBe(true)
+      expect(status.screenCaptureAvailable).toBe(true)
+      expect(status.atspiAvailable).toBe(true)
+      expect(status.inputModes.hyprlandPlugin).toBe(false)
+      expect(status.hyprlandPluginState).toBe('loaded_discovery_only')
+      expect(status.summary).toBe(
+        'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · Hyprland plugin loaded. Background input unavailable.)',
+      )
+      expect(status.limitations.some((line) => line.includes('Hyprland plugin loaded. Background input unavailable.'))).toBe(true)
+      expect(status.limitations.some((line) => line.includes('plugin:cua:enabled'))).toBe(false)
+
+      const help = computerSetupHelp(status)
+      expect(help?.label).toBe(COMPUTER_SETUP_HELP_LABEL)
+      expect(help?.state).toBe('loaded_discovery_only')
+      expect(help?.prompt).toContain('current Omarchy channel')
+      expect(help?.prompt).toContain('compatible')
+      expect(help?.prompt).not.toContain('plugin:cua:enabled')
+    } finally {
+      if (prevWayland === undefined) delete process.env.WAYLAND_DISPLAY
+      else process.env.WAYLAND_DISPLAY = prevWayland
+      if (prevDisplay === undefined) delete process.env.DISPLAY
+      else process.env.DISPLAY = prevDisplay
+    }
+  })
+
+  it('offers guided setup help for installed-not-loaded, discovery-only, and loaded-disabled states only', () => {
+    const installedNotLoaded = readyStatus({
+      available: true,
+      hyprlandPluginState: 'installed_not_loaded',
+      limitations: [hyprlandPluginLimitation('installed_not_loaded')!],
+      summary: 'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · Hyprland plugin installed, not loaded)',
+    })
+    const helpNotLoaded = computerSetupHelp(installedNotLoaded)
+    expect(helpNotLoaded).not.toBeNull()
+    expect(helpNotLoaded?.label).toBe(COMPUTER_SETUP_HELP_LABEL)
+    expect(helpNotLoaded?.state).toBe('installed_not_loaded')
+    expect(helpNotLoaded?.prompt).toContain('installed_not_loaded')
+    expect(helpNotLoaded?.prompt).toContain(installedNotLoaded.summary)
+    expect(helpNotLoaded?.prompt).toContain(OMARCHY_ACTIVATION_GUIDE)
+    expect(helpNotLoaded?.prompt).toContain('Check the current state on this host')
+    expect(helpNotLoaded?.prompt).toContain('Ask for my confirmation before applying')
+    expect(helpNotLoaded?.prompt).toContain('verify the Computer Use / Hyprland plugin status again')
+
+    const discoveryOnlyStatus = readyStatus({
+      available: true,
+      hyprlandPluginState: 'loaded_discovery_only',
+      limitations: [hyprlandPluginLimitation('loaded_discovery_only')!],
+      summary: 'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · Hyprland plugin loaded. Background input unavailable.)',
+    })
+    const helpDiscovery = computerSetupHelp(discoveryOnlyStatus)
+    expect(helpDiscovery).not.toBeNull()
+    expect(helpDiscovery?.label).toBe('Ask Milo for help')
+    expect(helpDiscovery?.state).toBe('loaded_discovery_only')
+    expect(helpDiscovery?.prompt).toContain('loaded_discovery_only')
+    expect(helpDiscovery?.prompt).toContain('Hyprland plugin loaded. Background input unavailable.')
+    expect(helpDiscovery?.prompt).toContain('current Omarchy channel')
+    expect(helpDiscovery?.prompt).not.toContain('plugin:cua:enabled')
+    expect(withComputerSetupHelp(discoveryOnlyStatus).setupHelp).toEqual(helpDiscovery)
+
+    const loadedDisabled = readyStatus({
+      available: true,
+      hyprlandPluginState: 'loaded_disabled',
+      limitations: [hyprlandPluginLimitation('loaded_disabled')!],
+      summary: 'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · Hyprland plugin loaded, input disabled)',
+    })
+    const helpDisabled = computerSetupHelp(loadedDisabled)
+    expect(helpDisabled).not.toBeNull()
+    expect(helpDisabled?.label).toBe('Ask Milo for help')
+    expect(helpDisabled?.state).toBe('loaded_disabled')
+    expect(helpDisabled?.prompt).toContain('loaded_disabled')
+    expect(helpDisabled?.prompt).toContain('plugin:cua:enabled')
+    expect(helpDisabled?.prompt).toContain(OMARCHY_ACTIVATION_GUIDE)
+    expect(withComputerSetupHelp(loadedDisabled).setupHelp).toEqual(helpDisabled)
+
+    const ready = readyStatus({
+      hyprlandPluginState: 'input_available',
+      inputModes: { accessibility: true, windowScopedPointer: true, xsendEvent: false, hyprlandPlugin: true },
+      summary: 'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · Hyprland input ready)',
+    })
+    expect(computerSetupHelp(ready)).toBeNull()
+    expect(withComputerSetupHelp(ready).setupHelp).toBeNull()
+    expect(computerSetupUnavailableReply(ready)).toContain('already ready')
+
+    const nonHyprland = readyStatus({ hyprlandPluginState: 'not_applicable' })
+    expect(computerSetupHelp(nonHyprland)).toBeNull()
+    expect(computerSetupUnavailableReply(nonHyprland)).toContain('Hyprland Linux host')
+
+    expect(computerSetupHelp(readyStatus({ hyprlandPluginState: undefined }))).toBeNull()
+    expect(computerSetupHelp(readyStatus({ hyprlandPluginState: 'not_installed' }))).toBeNull()
+    expect(computerSetupHelp(readyStatus({ hyprlandPluginState: 'unverified' }))).toBeNull()
+    expect(computerSetupHelp(null)).toBeNull()
+
+    // Incompatible ABI, unsupported input protocol, and stopped transport must never suggest enabling plugin:cua:enabled.
+    for (const [state, expectedSnippet] of [
+      ['loaded_abi_mismatch', 'ABI does not match'],
+      ['loaded_unsupported_protocol', 'protocol'],
+      ['loaded_transport_stopped', 'transport is stopped'],
+      ['unverified', 'could not be verified'],
+    ] as const) {
+      const limitation = hyprlandPluginLimitation(state)!
+      const st = readyStatus({
+        hyprlandPluginState: state,
+        limitations: [limitation],
+        summary: `Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · ${hyprlandPluginSummaryTag(state)})`,
+      })
+      expect(computerSetupHelp(st)).toBeNull()
+      expect(limitation).toContain(expectedSnippet)
+      expect(limitation).not.toContain('plugin:cua:enabled')
+      expect(limitation).not.toContain('reload')
+      const reply = computerSetupUnavailableReply(st)
+      expect(reply).toContain(expectedSnippet)
+      expect(reply).not.toContain('plugin:cua:enabled')
+      expect(reply).not.toContain('reload')
+    }
+  })
+
+  it('delivers specific user-facing refusal guidance without plugin:cua:enabled for ABI mismatch, protocol mismatch, and stopped transport', async () => {
+    for (const [state, expectedSnippet] of [
+      ['loaded_abi_mismatch', 'ABI does not match'],
+      ['loaded_unsupported_protocol', 'protocol other than v3'],
+      ['loaded_transport_stopped', 'transport is stopped'],
+      ['unverified', 'could not be verified'],
+    ] as const) {
+      const manager = new ComputerManager(
+        makeFakeAdapter({
+          probe: async () =>
+            readyStatus({
+              hyprlandPluginState: state,
+              inputModes: {
+                accessibility: true,
+                windowScopedPointer: false,
+                xsendEvent: false,
+                hyprlandPlugin: false,
+              },
+              limitations: [hyprlandPluginLimitation(state)!],
+              summary: `Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · ${hyprlandPluginSummaryTag(state)})`,
+            }),
+        }),
+      )
+      const opened = await manager.openWindow({
+        turnId: `turn-${state}`,
+        expectedWindow: sampleWindow(),
+        visionConfirmed: true,
+      })
+      expect(opened.ok).toBe(true)
+      const captureId = opened.ok ? opened.observation.snapshot.captureId : ''
+      const plan = await manager.planAction(`turn-${state}`, {
+        action: 'click',
+        x: 10,
+        y: 10,
+        captureId,
+      })
+      expect(plan.ok).toBe(false)
+      if (!plan.ok) {
+        expect(plan.error).toContain(expectedSnippet)
+        expect(plan.error).not.toContain('plugin:cua:enabled')
+        expect(plan.error).not.toContain('reload')
+      }
+    }
   })
 })
