@@ -62,7 +62,7 @@ struct RootView: View {
             case .pairing:
                 PairingView()
             case .chat(let account):
-                ChatView(account: account)
+                MainTabView(account: account)
             }
         }
         .tint(MiloTheme.accent)
@@ -76,6 +76,7 @@ struct RootView: View {
                 // Whatever was being waited for while the phone was away is on the screen
                 // now.
                 model.becameActive()
+                Task { await model.retryPendingRestoreIfNeeded() }
                 Task { await model.refreshSessions() }
                 // The routines too: what the daemon ran while the phone slept is on the
                 // list, and the reminders are re-scheduled from it for the next stretch.

@@ -1,10 +1,18 @@
 import Foundation
 
+/// Outcome of fetching an ephemeral Computer Use tool preview.
+enum ToolPreviewResult {
+    case image(Data)
+    case expired
+    case unavailable
+}
+
 /// What the daemon answers for one action, or the reason it refused.
 enum ApiError: LocalizedError {
     case badAddress
     case unreachable(String)
     case refused(String)
+    case httpStatus(Int, String?)
     case badAnswer
 
     var errorDescription: String? {
@@ -12,6 +20,8 @@ enum ApiError: LocalizedError {
         case .badAddress: return "The address this device was paired with is not usable."
         case .unreachable(let address): return "Could not reach the daemon at \(address)."
         case .refused(let message): return message
+        case .httpStatus(let code, let message):
+            return message ?? "The daemon answered \(code)."
         case .badAnswer: return "The daemon answered with something that was not JSON."
         }
     }
@@ -170,13 +180,17 @@ enum MiloApi {
         let response: URLResponse
         do {
             (data, response) = try await URLSession.shared.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw ApiError.unreachable(account.display)
         }
         guard let http = response as? HTTPURLResponse else { throw ApiError.badAnswer }
         guard http.statusCode == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ApiError.refused(message ?? "The daemon answered \(http.statusCode).")
+            throw ApiError.httpStatus(http.statusCode, message)
         }
         do {
             return try JSONDecoder().decode(T.self, from: data)
@@ -213,6 +227,10 @@ enum MiloApi {
         let response: URLResponse
         do {
             (body, response) = try await URLSession.shared.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw ApiError.refused("Could not reach the daemon at \(account.display).")
         }
@@ -227,6 +245,38 @@ enum MiloApi {
 
     /// What the upload route answers with: the daemon's own name for the file it took.
     struct UploadAck: Decodable { let uploadId: String }
+
+    /// Authenticated fetch for an ephemeral Computer Use tool preview image.
+    static func fetchToolPreview(
+        _ account: Account,
+        id: String,
+        callId: String,
+        sessionId: String
+    ) async -> ToolPreviewResult {
+        guard !id.isEmpty, !callId.isEmpty, !sessionId.isEmpty else { return .unavailable }
+        let encodedId = id.addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? id
+        guard let base = account.url("/api/tool-preview/\(encodedId)"),
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return .unavailable
+        }
+        components.queryItems = [
+            URLQueryItem(name: "callId", value: callId),
+            URLQueryItem(name: "sessionId", value: sessionId),
+        ]
+        guard let url = components.url else { return .unavailable }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("Bearer \(account.token)", forHTTPHeaderField: "authorization")
+        request.timeoutInterval = 25
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .unavailable }
+            if http.statusCode == 410 || http.statusCode == 404 { return .expired }
+            guard http.statusCode == 200 else { return .unavailable }
+            return .image(data)
+        } catch {
+            return .unavailable
+        }
+    }
 
     /// RFC 3986's unreserved set — the characters a header can carry bare.
     private static let unreserved = CharacterSet(
@@ -256,7 +306,12 @@ enum MiloApi {
         try await call("crew", account: account, as: [BotAuthor].self)
     }
 
-    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false, backend: String = "milo", confirmed: Bool = false, botId: String? = nil) async throws {
+    private struct SessionCreated: Decodable {
+        let id: String
+    }
+
+    @discardableResult
+    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false, backend: String = "milo", confirmed: Bool = false, botId: String? = nil) async throws -> String {
         var body: [String: Any] = ["chatId": account.chatId, "backend": backend]
         if backend == "command-code" { body["confirmed"] = confirmed }
         if let title { body["title"] = title }
@@ -269,7 +324,8 @@ enum MiloApi {
         // first words are the proposal, and the session must already be in the mode
         // when they arrive.
         if plan { body["plan"] = true }
-        _ = try await call("new-session", body, account: account, as: Ack.self)
+        let created = try await call("new-session", body, account: account, as: SessionCreated.self)
+        return created.id
     }
 
     static func resumeSession(_ account: Account, id: String) async throws {
@@ -387,6 +443,10 @@ enum MiloApi {
     /// is actually running, which is not always the same thing.
     static func overview(_ account: Account) async throws -> SettingsOverview {
         try await call("overview", account: account, as: SettingsOverview.self)
+    }
+
+    static func computerStatus(_ account: Account) async throws -> SettingsOverview.ComputerStatus {
+        try await call("computer-status", account: account, as: SettingsOverview.ComputerStatus.self)
     }
 
     // MARK: - Routines
@@ -728,6 +788,25 @@ struct SettingsOverview: Decodable {
         }
     }
 
+    struct ComputerConfig: Decodable {
+        let enabled: Bool?
+    }
+
+    struct ComputerSetupHelp: Decodable, Equatable {
+        let label: String
+        let state: String
+        let prompt: String
+    }
+
+    struct ComputerStatus: Decodable, Equatable {
+        let available: Bool
+        let summary: String
+        let reason: String?
+        let limitations: [String]
+        let hyprlandPluginState: String?
+        let setupHelp: ComputerSetupHelp?
+    }
+
     struct Config: Decodable {
         let providers: [String: ProviderConfig]?
         let reasoningEffort: String?
@@ -739,6 +818,7 @@ struct SettingsOverview: Decodable {
         let search: Search?
         let google: GoogleConfig?
         let browser: Browser?
+        let computer: ComputerConfig?
         let gateways: [String: Gateway]?
         let web: Web?
         let sessions: Sessions?
@@ -762,6 +842,7 @@ struct SettingsOverview: Decodable {
     let memoryStats: MemoryStats?
     let mcp: McpReport?
     let google: GoogleReport?
+    let computer: ComputerStatus?
     /**
      The values a settings screen may offer, sent by the daemon so a client draws
      what the server accepts. Absent from an older daemon: the screen then offers

@@ -6,6 +6,7 @@ struct ProjectChanges: View {
     @Environment(AppModel.self) private var model
     @State private var diff: WorkDiff?
     @State private var error: String?
+    @State private var errorIsConnection = false
     /// Recording the folder as it is now, while it is being recorded.
     @State private var tracking = false
     /// The changed file whose hunks are open, risen from the bottom of the screen.
@@ -25,7 +26,7 @@ struct ProjectChanges: View {
                 }
             }
 
-            if let error {
+            if let error, !(errorIsConnection && model.connectionLine != nil) {
                 MiloErrorPill(text: error)
             }
 
@@ -103,6 +104,7 @@ struct ProjectChanges: View {
         }
         .task { await read() }
         .onChange(of: model.workMoved) { _, _ in Task { await read() } }
+        .onChange(of: model.onlineEpoch) { _, _ in Task { await read() } }
         // The file's own hunks, risen from the bottom: a diff is read on its own, and a long
         // one would otherwise stretch the project's page it changed in.
         .sheet(item: $reading) { file in DiffDetail(file: file) }
@@ -112,8 +114,17 @@ struct ProjectChanges: View {
         do {
             diff = try await model.projectDiff(projectId)
             error = nil
+            errorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                self.error = nil
+                self.errorIsConnection = false
+            } else {
+                self.errorIsConnection = AppModel.isConnectionError(error)
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 

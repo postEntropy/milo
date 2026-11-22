@@ -9,82 +9,55 @@ import SwiftUI
  It lives beside the chat rather than in Settings: a routine is a thing you use, not a
  setting you configure.
  */
-struct RoutinesView: View, Equatable {
+struct RoutinesView: View {
     let account: Account
-    /// Whether one routine's own page is open on top of the list, told to the shell: the
-    /// drawer's swipe belongs to the list, and over a page it keeps out of the way — the way
-    /// back from one is the platform's own, the edge swipe it answers and the control the stack
-    /// draws.
-    @Binding var pushed: Bool
-    /// Opening the sessions from here. The drawer belongs to the chat, but a screen that is
-    /// not the chat still reaches it — by this control and by the same swipe.
-    let onSessions: () -> Void
+    @Binding var path: NavigationPath
+    let embeddedInHub: Bool
 
-    nonisolated static func == (lhs: RoutinesView, rhs: RoutinesView) -> Bool {
-        lhs.account == rhs.account
-    }
     @Environment(AppModel.self) private var model
-    @State private var path: [Route] = []
     @State private var showingNewRoutine = false
 
-    /// Where this page can navigate: one routine's page, or the field that makes one.
-    private enum Route: Hashable {
+    /// Where this page can navigate: one routine's page.
+    enum Route: Hashable {
         case detail(routine: String)
     }
 
-    var body: some View {
-        NavigationStack(path: $path) {
-            RoutineList(
-                onSelect: { path.append(.detail(routine: $0)) },
-                onCompose: { showingNewRoutine = true },
-                onSessions: onSessions
-            )
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: Route.self) { route in
-                switch route {
-                case .detail(let routine):
-                    RoutineDetail(routineId: routine)
-                }
-            }
-            .sheet(isPresented: $showingNewRoutine) {
-                NewRoutine(account: account)
-            }
-        }
-        // No drag of this screen's own over the stack: the way back from a page is the platform's
-        // own — the edge swipe the stack already answers, and the control it draws in the bar —
-        // rather than a second gesture that only mimics them from the middle of the screen.
-        // The permission the reminders need, asked once, the first time the screen opens.
-        .task { await model.askToRemind() }
-        // A tapped reminder names a routine: open it whether this page is already up or
-        // this is where the launch landed.
-        .onChange(of: model.pendingRoutine) { _, _ in openPending() }
-        // On the way in, and as the stack moves: the shell keeps the drawer's swipe off a
-        // page, and hands it back the moment the list is what is showing.
-        .onChange(of: path) { _, next in pushed = !next.isEmpty }
-        .onAppear {
-            openPending()
-            pushed = !path.isEmpty
+    @ViewBuilder
+    static func destination(for route: Route) -> some View {
+        switch route {
+        case .detail(let routine):
+            RoutineDetail(routineId: routine)
+                .toolbarVisibility(.hidden, for: .tabBar)
         }
     }
 
-    /// Opens the routine a tapped reminder named, if one is waiting.
-    private func openPending() {
-        guard let id = model.pendingRoutine else { return }
-        model.pendingRoutine = nil
-        path = [.detail(routine: id)]
+    var body: some View {
+        RoutineList(
+            embeddedInHub: embeddedInHub,
+            onSelect: { path.append(Route.detail(routine: $0)) },
+            onCompose: { showingNewRoutine = true }
+        )
+        .toolbar(embeddedInHub ? .visible : .hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingNewRoutine) {
+            NewRoutine(account: account)
+        }
+        // The permission the reminders need, asked once, the first time the screen opens.
+        .task { await model.askToRemind() }
     }
 }
 
 // MARK: - The list
 
 private struct RoutineList: View {
+    let embeddedInHub: Bool
     let onSelect: (String) -> Void
     let onCompose: () -> Void
-    let onSessions: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var feed: [RoutineFeedEntry] = []
     @State private var feedError: String?
+    @State private var feedErrorIsConnection = false
     /// The output being read, risen from the bottom of the screen. A timeline row reads
     /// its run here rather than opening the routine behind it: the person asked for the
     /// output, not for the page it belongs to.
@@ -194,7 +167,7 @@ private struct RoutineList: View {
                     }
                 }
 
-                if let feedError {
+                if let feedError, !(feedErrorIsConnection && model.connectionLine != nil) {
                     VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
                         Text("Recent outputs")
                             .font(MiloTheme.Text.title)
@@ -257,43 +230,30 @@ private struct RoutineList: View {
             .frame(maxWidth: .infinity)
         }
         .miloWallpaperBackground()
-        // The way back to the sessions, at this screen's own top and in the chat's own
-        // control: the drawer belongs to the chat, but the routines are one press from it
-        // rather than a page with no exit. Drawn in the page's tone, so what scrolls under
-        // it stays under it — the same room the chat's bar keeps, in this screen's material.
         .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: MiloTheme.Space.one) {
-                HStack(spacing: 0) {
-                    SessionsButton(action: onSessions)
-                    Spacer(minLength: 0)
-                    if model.routines.contains(where: \.finished) {
-                        Menu {
-                            menuItem(
-                                "Finished (\(model.routines.filter(\.finished).count))",
-                                "checkmark.circle"
-                            ) {
-                                showFinished = true
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(MiloTheme.foreground)
-                                .frame(width: 30, height: 30)
-                                .frame(width: 46, height: 46)
-                                .contentShape(Circle())
+            if !embeddedInHub || model.connectionLine != nil {
+                VStack(spacing: MiloTheme.Space.one) {
+                    if !embeddedInHub, model.routines.contains(where: \.finished) {
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            finishedMenu
+                                .glassEffect(.regular.interactive(), in: Circle())
                         }
-                        .foregroundStyle(MiloTheme.foreground)
-                        .buttonStyle(PressableStyle())
-                        .glassEffect(.regular.interactive(), in: Circle())
-                        .accessibilityLabel("Routine actions")
+                        .frame(minHeight: 46)
                     }
+                    ConnectionPill()
                 }
-                .frame(minHeight: 46)
-                ConnectionPill()
+                .padding(.horizontal, MiloTheme.margin)
+                .padding(.bottom, MiloTheme.Space.two)
+                .animation(.smooth(duration: 0.22), value: model.connectionLine)
             }
-            .padding(.horizontal, MiloTheme.margin)
-            .padding(.bottom, MiloTheme.Space.two)
-            .animation(.smooth(duration: 0.22), value: model.connectionLine)
+        }
+        .toolbar {
+            if embeddedInHub, model.routines.contains(where: \.finished) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    finishedMenu
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             MiloCornerActionButton(
@@ -308,6 +268,9 @@ private struct RoutineList: View {
         }
         .task { await model.refreshRoutines() }
         .task { await loadFeed() }
+        .onChange(of: model.onlineEpoch) { _, _ in
+            Task { await loadFeed() }
+        }
         // The output itself, risen from the bottom of the screen — the same drawer a
         // run on a routine's page opens, over the list it was read from.
         .sheet(item: $reading) { open in
@@ -333,12 +296,41 @@ private struct RoutineList: View {
         }
     }
 
+    private var finishedMenu: some View {
+        Menu {
+            menuItem(
+                "Finished (\(model.routines.filter(\.finished).count))",
+                "checkmark.circle"
+            ) {
+                showFinished = true
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: embeddedInHub ? 16 : 20, weight: .semibold))
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(width: embeddedInHub ? 32 : 46, height: embeddedInHub ? 32 : 46)
+                .contentShape(Circle())
+        }
+        .foregroundStyle(MiloTheme.foreground)
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("Routine actions")
+    }
+
     private func loadFeed() async {
         do {
             feed = try await model.routineFeed()
             feedError = nil
+            feedErrorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            feedError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                feedError = nil
+                feedErrorIsConnection = false
+            } else {
+                feedErrorIsConnection = AppModel.isConnectionError(error)
+                feedError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 }
@@ -509,6 +501,7 @@ private struct RoutineDetail: View {
     @State private var feed: [RoutineFeedEntry] = []
     @State private var total = 0
     @State private var runsError: String?
+    @State private var runsErrorIsConnection = false
     /// The run being read, risen from the bottom of the screen — nil while none is.
     @State private var reading: ReadingRun?
     @State private var working = false
@@ -644,7 +637,7 @@ private struct RoutineDetail: View {
                         .font(MiloTheme.Text.title)
                         .foregroundStyle(MiloTheme.foreground)
 
-                    if let runsError {
+                    if let runsError, !(runsErrorIsConnection && model.connectionLine != nil) {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                             Text(runsError)
                                 .font(MiloTheme.Text.small)
@@ -796,6 +789,11 @@ private struct RoutineDetail: View {
             }
         }
         .task { await loadRuns(reset: true) }
+        .onChange(of: model.onlineEpoch) { _, _ in
+            if runs.isEmpty || runsError != nil {
+                Task { await loadRuns(reset: true) }
+            }
+        }
         // The run itself, risen from the bottom of the screen: the same container a changed
         // file's hunks use (see `DetailSheet`).
         .sheet(item: $reading) { open in
@@ -826,6 +824,7 @@ private struct RoutineDetail: View {
 
     private func loadRuns(reset: Bool) async {
         runsError = nil
+        runsErrorIsConnection = false
         async let runsTask: RoutineRuns = model.routineRuns(routineId, offset: reset ? 0 : runs.count, limit: Self.page)
         async let feedTask: [RoutineFeedEntry] = (try? await model.routineFeed()) ?? []
         do {
@@ -833,8 +832,16 @@ private struct RoutineDetail: View {
             runs = reset ? page.runs : runs + page.runs
             total = page.total
             feed = await feedTask
+        } catch is CancellationError {
+            return
         } catch {
-            runsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                runsError = nil
+                runsErrorIsConnection = false
+            } else {
+                runsErrorIsConnection = AppModel.isConnectionError(error)
+                runsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
@@ -933,6 +940,7 @@ struct RunDetail: View {
     @Environment(AppModel.self) private var model
     @State private var thread: [AppModel.Message]?
     @State private var error: String?
+    @State private var errorIsConnection = false
 
     var body: some View {
         DetailSheet {
@@ -947,7 +955,7 @@ struct RunDetail: View {
                         .foregroundStyle(MiloTheme.muted)
                 }
 
-                if let error {
+                if let error, !(errorIsConnection && model.connectionLine != nil) {
                     Text(error)
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.danger)
@@ -981,6 +989,11 @@ struct RunDetail: View {
             }
         }
         .task { await read() }
+        .onChange(of: model.onlineEpoch) { _, _ in
+            if thread == nil || error != nil {
+                Task { await read() }
+            }
+        }
     }
 
     private func read() async {
@@ -998,8 +1011,17 @@ struct RunDetail: View {
                 )
             }
             error = nil
+            errorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                self.error = nil
+                self.errorIsConnection = false
+            } else {
+                self.errorIsConnection = AppModel.isConnectionError(error)
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ struct ProjectFiles: View {
     @Environment(AppModel.self) private var model
     @State private var tree: WorkTree?
     @State private var error: String?
+    @State private var errorIsConnection = false
     /// The file being read, risen from the bottom of the screen — the drawer a changed
     /// file's hunks rise in, rather than a reader that pushes the tree it came from down
     /// the page.
@@ -34,7 +35,7 @@ struct ProjectFiles: View {
                 .accessibilityLabel("New folder")
             }
 
-            if let error {
+            if let error, !(errorIsConnection && model.connectionLine != nil) {
                 MiloErrorPill(text: error)
             }
 
@@ -83,6 +84,7 @@ struct ProjectFiles: View {
         }
         .task { await read() }
         .onChange(of: model.workMoved) { _, _ in Task { await read() } }
+        .onChange(of: model.onlineEpoch) { _, _ in Task { await read() } }
         // The file itself, risen from the bottom: a file is read on its own, as a changed
         // file's hunks are, and a long one would otherwise stretch the page it was opened
         // from.
@@ -120,8 +122,17 @@ struct ProjectFiles: View {
         do {
             tree = try await model.projectTree(projectId)
             error = nil
+            errorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                self.error = nil
+                self.errorIsConnection = false
+            } else {
+                self.errorIsConnection = AppModel.isConnectionError(error)
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 }

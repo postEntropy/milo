@@ -346,50 +346,82 @@ extension MiloClient.State {
         default: return false
         }
     }
+
+    var headline: String {
+        switch self {
+        case .connecting: return "Connecting to Milo"
+        case .offline: return "Reconnecting to Milo"
+        case .refused: return "Connection refused"
+        case .unreadable: return "Incompatible daemon"
+        case .online: return "Connected"
+        case .idle: return "Not connected"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .connecting, .offline: return "Milo may still be working on the server."
+        case .refused(let reason): return reason
+        case .unreadable: return wording
+        case .online, .idle: return wording
+        }
+    }
 }
 
 /**
  What a screen says about the socket, worn the way every control here is made — the
  platform's own glass, tinted with the tone of the state — so the line reads as part of the
- surface rather than a bare sentence dropped over the page. A wait keeps the app's own sweep
- travelling its words, which is what says the app is still trying; an answer the daemon gave
- is drawn settled, because it is a thing to read rather than a thing to wait on. Held between
- the bar's own margins and hugging its words: a two-word line is a small pill, and a long
- refusal grows and wraps it.
+ surface rather than a bare sentence dropped over the page.
  */
 struct ConnectionPill: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let state = model.connectionLine {
-            let tone = model.connection.tone
+        if model.connectionLine != nil {
+            let state = model.connection
+            let tone = state.tone
             HStack(spacing: MiloTheme.Space.three) {
-                Image(systemName: model.connection.symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(tone)
-                    .symbolEffect(.rotate, options: .repeating, isActive: model.connection.waiting)
-                if model.connection.waiting {
-                    Glare(text: state, font: MiloTheme.Text.small, tone: tone)
-                } else {
-                    Text(state)
+                Image(systemName: state.symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .symbolEffect(.rotate, options: .repeating, isActive: state.waiting)
+                    .frame(width: 34, height: 34)
+                    .background(tone.gradient, in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.headline)
+                        .font(MiloTheme.Text.base.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                        .lineLimit(1)
+                    Text(state.detail)
                         .font(MiloTheme.Text.small)
-                        .foregroundStyle(tone)
+                        .foregroundStyle(MiloTheme.mutedStrong)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Button("Reconnect") { model.reconnect() }
-                    .font(MiloTheme.Text.small.weight(.semibold))
-                    .foregroundStyle(MiloTheme.foreground)
-                    .padding(.horizontal, MiloTheme.Space.three)
-                    .padding(.vertical, MiloTheme.Space.two)
-                    .contentShape(Capsule())
-                    .buttonStyle(PressableStyle())
-                    .glassEffect(.regular.interactive(), in: Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    model.reconnect()
+                } label: {
+                    Text("Reconnect")
+                        .font(MiloTheme.Text.small.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, MiloTheme.Space.three + 2)
+                        .padding(.vertical, MiloTheme.Space.two)
+                        .background(tone, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressableStyle())
             }
-            .padding(MiloTheme.Space.three)
-            .glassEffect(.regular.tint(tone.opacity(0.12)), in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            .padding(.horizontal, MiloTheme.Space.four)
+            .padding(.vertical, MiloTheme.Space.three)
+            .frame(maxWidth: 620)
+            .glassEffect(.regular.tint(tone.opacity(0.22)), in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+            .shadow(color: tone.opacity(0.14), radius: 12, y: 4)
             .padding(.top, MiloTheme.Space.two)
-            .transition(.opacity)
+            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
         }
     }
 }
@@ -466,5 +498,54 @@ private struct SessionDeletion: ViewModifier {
 extension View {
     func sessionDelete(_ id: String, isPresented: Binding<Bool>) -> some View {
         modifier(SessionDeletion(id: id, isPresented: isPresented))
+    }
+}
+
+/// Shared floating notice pill for `AppModel.note` across Chat, Hub, pinned tabs, and Settings.
+struct MiloNoteToast: View {
+    var topPadding: CGFloat = MiloTheme.Space.two
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Group {
+            if let note = model.note {
+                HStack(spacing: 0) {
+                    Spacer(minLength: MiloTheme.margin)
+                    HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+                        Image(systemName: note.failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                            .font(MiloTheme.Text.body)
+                            .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.success)
+                        Text(note.text)
+                            .font(MiloTheme.Text.body)
+                            .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.foreground)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            model.dismissNote()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(MiloTheme.muted)
+                                .frame(width: 26, height: 26)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Dismiss")
+                    }
+                    .padding(.horizontal, MiloTheme.Space.four)
+                    .padding(.vertical, MiloTheme.Space.three)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                    Spacer(minLength: MiloTheme.margin)
+                }
+                .padding(.top, topPadding)
+                .transition(.opacity)
+                .task(id: note) {
+                    do { try await Task.sleep(for: .seconds(note.failed ? 9 : 5)) }
+                    catch { return }
+                    guard model.note == note else { return }
+                    model.dismissNote()
+                }
+            }
+        }
+        .animation(.smooth(duration: 0.22), value: model.note)
     }
 }

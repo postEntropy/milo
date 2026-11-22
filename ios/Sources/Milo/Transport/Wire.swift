@@ -130,6 +130,12 @@ struct TodoItem: Decodable, Hashable {
 /// A tool call as a surface draws it. `text` is the server's own rendering, which
 /// a stored transcript carries and a live `tool-start` does not — a live line
 /// therefore shows the name alone, and gets its text when the session is read back.
+struct ToolPreviewRef: Decodable, Hashable {
+    let id: String
+    let width: Int
+    let height: Int
+}
+
 struct ToolMark: Decodable, Hashable {
     let name: String
     let text: String
@@ -146,6 +152,10 @@ struct ToolMark: Decodable, Hashable {
     /// computes it where the write happens, so a `replace_all` knows every place it
     /// landed; a level below `full` withholds it with the result.
     var change: [FileChange]?
+    /// Opaque in-memory preview reference for expanded Computer Use rows.
+    var preview: ToolPreviewRef?
+    /// Tool call id bound to `preview` so preview requests verify the exact call.
+    var callId: String?
 }
 
 /// One line of a change: the number it had, the number it has, and whether it arrived,
@@ -410,7 +420,7 @@ enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
     case toolStart(id: String, name: String, text: String?, input: String?)
-    case toolEnd(id: String, name: String, isError: Bool, drawFailure: Bool, result: String?, change: [FileChange]?)
+    case toolEnd(id: String, name: String, isError: Bool, drawFailure: Bool, result: String?, change: [FileChange]?, preview: ToolPreviewRef?)
     case todo([TodoItem])
     /// The project's checks after a turn that wrote. The words are the core's, so
     /// the phone says what the browser and the terminal say.
@@ -437,7 +447,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case input, type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change
+        case input, type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change, preview
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
         case bot, status, error
@@ -467,7 +477,8 @@ enum AgentEvent: Decodable {
                 isError: read(.isError, false),
                 drawFailure: read(.drawFailure, false),
                 result: readText(.result),
-                change: (try? container.decodeIfPresent([FileChange].self, forKey: .change)) ?? nil
+                change: (try? container.decodeIfPresent([FileChange].self, forKey: .change)) ?? nil,
+                preview: (try? container.decodeIfPresent(ToolPreviewRef.self, forKey: .preview)) ?? nil
             )
         case "todo": self = .todo(read(.items, []))
         case "verification": self = .verification(text: readText(.text) ?? "", ok: read(.ok, false))

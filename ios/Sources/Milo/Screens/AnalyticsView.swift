@@ -419,16 +419,16 @@ private enum PeriodFilter: Int, CaseIterable, Identifiable {
     }
 }
 
-struct AnalyticsView: View, Equatable {
+struct AnalyticsView: View {
     let account: Account
-    @Binding var pushed: Bool
-    let onSessions: () -> Void
+    var externalPath: Binding<NavigationPath>? = nil
 
-    nonisolated static func == (lhs: AnalyticsView, rhs: AnalyticsView) -> Bool {
-        lhs.account == rhs.account
-    }
     @Environment(AppModel.self) private var appModel
-    @State private var path: [String] = []
+    @State private var localPath = NavigationPath()
+
+    private enum Route: Hashable {
+        case detail(String)
+    }
     @State private var viewMode: AnalyticsViewMode = .traces
     @State private var report: AnalyticsReport?
     @State private var turnsReport: AnalyticsTurnsReport?
@@ -440,6 +440,7 @@ struct AnalyticsView: View, Equatable {
     @State private var collapsedTurns: Set<String> = []
     @State private var inspectedSession: InspectedSession?
     @State private var error: String?
+    @State private var errorIsConnection = false
     @State private var query = ""
     @State private var kind = "all"
     @State private var days = 0
@@ -477,12 +478,46 @@ struct AnalyticsView: View, Equatable {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            ScrollView {
+        Group {
+            if externalPath != nil {
+                content
+            } else {
+                NavigationStack(path: $localPath) {
+                    content
+                }
+            }
+        }
+    }
+
+    private func pushDetail(_ id: String) {
+        if let externalPath {
+            externalPath.wrappedValue.append(Route.detail(id))
+        } else {
+            localPath.append(Route.detail(id))
+        }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Task { await load() }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: externalPath != nil ? 16 : 18, weight: .semibold))
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(width: 30, height: 30)
+                .symbolEffect(.rotate, options: .repeating, isActive: loading)
+        }
+        .disabled(loading)
+        .accessibilityLabel("Refresh")
+    }
+
+    private var content: some View {
+        ScrollView {
                 VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
                     heroCard
 
-                    if let error {
+                    if let error, !(errorIsConnection && appModel.connectionLine != nil) {
                         MiloErrorPill(text: error)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
@@ -505,43 +540,51 @@ struct AnalyticsView: View, Equatable {
             .scrollDismissesKeyboard(.interactively)
             .miloWallpaperBackground()
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: MiloTheme.Space.one) {
-                    HStack(spacing: 0) {
-                        SessionsButton(action: onSessions)
-                        Spacer(minLength: 0)
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            Task { await load() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(MiloTheme.foreground)
-                                .frame(width: 30, height: 30)
-                                .symbolEffect(.rotate, options: .repeating, isActive: loading)
+                if externalPath == nil || appModel.connectionLine != nil {
+                    VStack(spacing: MiloTheme.Space.one) {
+                        if externalPath == nil {
+                            HStack(spacing: 0) {
+                                Spacer(minLength: 0)
+                                refreshButton
+                                    .buttonStyle(.glass)
+                                    .buttonBorderShape(.circle)
+                                    .controlSize(.regular)
+                                    .tint(MiloTheme.foreground)
+                            }
+                            .frame(minHeight: 46)
                         }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .controlSize(.regular)
-                        .tint(MiloTheme.foreground)
-                        .disabled(loading)
-                        .accessibilityLabel("Refresh")
+                        ConnectionPill()
                     }
-                    .frame(minHeight: 46)
-                    ConnectionPill()
+                    .padding(.horizontal, MiloTheme.margin)
+                    .padding(.bottom, MiloTheme.Space.two)
+                    .animation(.smooth(duration: 0.22), value: appModel.connectionLine)
                 }
-                .padding(.horizontal, MiloTheme.margin)
-                .padding(.bottom, MiloTheme.Space.two)
-                .animation(.smooth(duration: 0.22), value: appModel.connectionLine)
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: String.self) { id in
-                AnalyticsDetailView(account: account, id: id)
+            .toolbar(externalPath != nil ? .visible : .hidden, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if externalPath != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        refreshButton
+                            .tint(MiloTheme.foreground)
+                    }
+                }
+            }
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .detail(let id):
+                    AnalyticsDetailView(account: account, id: id)
+                        .toolbarVisibility(.hidden, for: .tabBar)
+                }
             }
             .sheet(item: $inspectedSession) { target in
                 SessionTracesSheet(account: account, sessionId: target.id, sessionTitle: target.id)
             }
             .refreshable { await load() }
             .task { await load() }
+            .onChange(of: appModel.onlineEpoch) { _, _ in
+                Task { await load() }
+            }
             .onChange(of: viewMode) { _, _ in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 offset = 0
@@ -557,9 +600,6 @@ struct AnalyticsView: View, Equatable {
                 offset = 0
                 Task { await load() }
             }
-        }
-        .onChange(of: path) { _, value in pushed = !value.isEmpty }
-        .onAppear { pushed = !path.isEmpty }
     }
 
     private var heroCard: some View {
@@ -968,7 +1008,7 @@ struct AnalyticsView: View, Equatable {
                                     }
                                 },
                                 onSelect: { id in
-                                    path.append(id)
+                                    pushDetail(id)
                                 },
                                 onOpenSession: { sessionId in
                                     inspectedSession = InspectedSession(id: sessionId)
@@ -991,7 +1031,7 @@ struct AnalyticsView: View, Equatable {
                     LazyVStack(spacing: MiloTheme.Space.two) {
                         ForEach(report.events) { item in
                             TraceEventRow(item: item) {
-                                path.append(item.id)
+                                pushDetail(item.id)
                             }
                             .equatable()
                         }
@@ -1267,6 +1307,7 @@ struct AnalyticsView: View, Equatable {
                     report = next
                     catalogModels = models
                     error = nil
+                    errorIsConnection = false
                 }
             case .turns:
                 let (next, models) = try await fetchWithCatalog(
@@ -1281,12 +1322,21 @@ struct AnalyticsView: View, Equatable {
                     turnsReport = next
                     catalogModels = models
                     error = nil
+                    errorIsConnection = false
                 }
             }
+        } catch is CancellationError {
+            return
         } catch {
             guard generation == loadGeneration else { return }
             withAnimation(.smooth(duration: 0.22)) {
-                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                if appModel.consumeConnectionError(error) {
+                    self.error = nil
+                    self.errorIsConnection = false
+                } else {
+                    self.errorIsConnection = AppModel.isConnectionError(error)
+                    self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                }
             }
         }
     }
@@ -1367,6 +1417,7 @@ private struct AnalyticsDetailView: View {
     @Environment(AppModel.self) private var appModel
     @State private var detail: AnalyticsDetail?
     @State private var error: String?
+    @State private var errorIsConnection = false
     @State private var attachmentsOpen = false
     @State private var copiedKey: String?
 
@@ -1399,7 +1450,7 @@ private struct AnalyticsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                if let error {
+                if let error, !(errorIsConnection && appModel.connectionLine != nil) {
                     MiloErrorPill(text: error)
                 }
                 if let detail {
@@ -1463,20 +1514,38 @@ private struct AnalyticsDetailView: View {
                 .padding(.bottom, appModel.connectionLine == nil ? 0 : MiloTheme.Space.two)
                 .animation(.smooth(duration: 0.22), value: appModel.connectionLine)
         }
-        .task {
-            do {
-                let loaded = try await MiloApi.call(
-                    "analytics-detail",
-                    ["id": id],
-                    account: account,
-                    as: AnalyticsDetail.self,
-                    timeout: 120
-                )
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                    detail = loaded
-                }
-            } catch {
-                withAnimation(.smooth(duration: 0.22)) {
+        .task { await loadDetail() }
+        .onChange(of: appModel.onlineEpoch) { _, _ in
+            if detail == nil || error != nil {
+                Task { await loadDetail() }
+            }
+        }
+    }
+
+    @MainActor
+    private func loadDetail() async {
+        do {
+            let loaded = try await MiloApi.call(
+                "analytics-detail",
+                ["id": id],
+                account: account,
+                as: AnalyticsDetail.self,
+                timeout: 120
+            )
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                detail = loaded
+                error = nil
+                errorIsConnection = false
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            withAnimation(.smooth(duration: 0.22)) {
+                if appModel.consumeConnectionError(error) {
+                    self.error = nil
+                    self.errorIsConnection = false
+                } else {
+                    self.errorIsConnection = AppModel.isConnectionError(error)
                     self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 }
             }
@@ -2194,6 +2263,7 @@ struct SessionTracesSheet: View {
     @State private var report: SessionTraceReport?
     @State private var loading = false
     @State private var error: String?
+    @State private var errorIsConnection = false
     @State private var ascending = false
     @State private var copiedId = false
     @State private var collapsedTurns: Set<String> = []
@@ -2209,7 +2279,7 @@ struct SessionTracesSheet: View {
                 VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
                     summaryCard
 
-                    if let error {
+                    if let error, !(errorIsConnection && appModel.connectionLine != nil) {
                         MiloErrorPill(text: error)
                     }
 
@@ -2300,6 +2370,9 @@ struct SessionTracesSheet: View {
             }
             .task(id: sessionId) {
                 await load()
+            }
+            .onChange(of: appModel.onlineEpoch) { _, _ in
+                Task { await load() }
             }
         }
     }
@@ -2453,10 +2526,19 @@ struct SessionTracesSheet: View {
             withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
                 report = loaded
                 error = nil
+                errorIsConnection = false
             }
+        } catch is CancellationError {
+            return
         } catch {
             withAnimation(.smooth(duration: 0.22)) {
-                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                if appModel.consumeConnectionError(error) {
+                    self.error = nil
+                    self.errorIsConnection = false
+                } else {
+                    self.errorIsConnection = AppModel.isConnectionError(error)
+                    self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                }
             }
         }
     }

@@ -4,32 +4,15 @@ import SwiftUI
 /// the rounded edge and the shadow belong to it; this one is a plain column on
 /// the sidebar's own tone, full-bleed to the screen's edges.
 struct SessionsDrawer: View, Equatable {
-    let routinesSelected: Bool
-    let tasksSelected: Bool
-    let analyticsSelected: Bool
-    let crewSelected: Bool
-    /// Which world the session in front belongs to: the card is a project's, or the chat is
-    /// a session working in one. The list the drawer opens on follows it.
-    /// Whether the drawer is uncovered, so the list starts on the world in front each time
-    /// it is opened rather than on whichever one was looked at last.
     let revealed: Bool
     let swiping: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
-    let onNewFolderSession: (String, String) -> Void
     let onSettings: () -> Void
-    let onRoutines: () -> Void
-    let onTasks: () -> Void
-    let onAnalytics: () -> Void
-    let onCrew: () -> Void
     let onTraces: (SessionSummary) -> Void
 
     nonisolated static func == (lhs: SessionsDrawer, rhs: SessionsDrawer) -> Bool {
-        lhs.routinesSelected == rhs.routinesSelected
-            && lhs.tasksSelected == rhs.tasksSelected
-            && lhs.analyticsSelected == rhs.analyticsSelected
-            && lhs.crewSelected == rhs.crewSelected
-            && lhs.revealed == rhs.revealed
+        lhs.revealed == rhs.revealed
             && lhs.swiping == rhs.swiping
     }
     /// The switch's two sides. Choosing one moves the card behind the drawer to where that
@@ -135,17 +118,6 @@ struct SessionsDrawer: View, Equatable {
             .padding(.top, MiloTheme.Space.six)
             .padding(.bottom, MiloTheme.Space.two)
 
-            // Places, not modes: the routines and the task lists are pages of their own,
-            // reached the same way from either world, so they sit above the switch — never
-            // inside the list the switch narrows.
-            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                pageTab("Analytics", symbol: "chart.bar", selected: analyticsSelected, action: onAnalytics)
-                pageTab("Crew", symbol: "crew", selected: crewSelected, action: onCrew)
-                pageTab("Routines", symbol: "clock", selected: routinesSelected, action: onRoutines)
-                pageTab("Task lists", symbol: "checklist", selected: tasksSelected, action: onTasks)
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-
             // Which world the list is of, asked in the platform's own shape — and, asked for,
             // the field that narrows it takes that row.
             if searchOpen { searchField }
@@ -218,44 +190,6 @@ struct SessionsDrawer: View, Equatable {
         }
         .padding(.trailing, MiloTheme.Space.three)
         .padding(.bottom, MiloTheme.Space.four)
-    }
-
-    /// A workspace page beside the list: routines and task lists are places you go to from
-    /// either world, not controls that start a session and not sides of the switch, so they
-    /// sit under their own heading above it rather than inside the list it narrows or among
-    /// the controls at the foot.
-    /// Drawn as the list's own row — the same box, the same tone, the same fill for the one
-    /// showing — so it answers the finger the way a session does; what tells the two apart is
-    /// the mark and the name, never the box.
-    private func pageTab(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: MiloTheme.Space.two) {
-                Group {
-                    if symbol == "crew" {
-                        CrewDrawerMark(size: 23)
-                    } else {
-                        Image(systemName: symbol)
-                            .font(MiloTheme.Text.body)
-                    }
-                }
-                .foregroundStyle(MiloTheme.foreground)
-                .frame(width: MiloTheme.Space.six)
-                Text(title)
-                    .font(MiloTheme.Text.body.weight(.medium))
-                    .foregroundStyle(MiloTheme.foreground)
-                Spacer(minLength: MiloTheme.Space.two)
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.three)
-            .background(
-                selected ? MiloTheme.surfaceRaised : Color.clear,
-                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        }
-        .buttonStyle(PressableStyle())
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// What the search field narrows the list to: the words on the row, the preview and

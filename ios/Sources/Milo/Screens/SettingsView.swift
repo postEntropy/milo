@@ -13,6 +13,7 @@ import UIKit
  */
 struct SettingsView: View {
     let account: Account
+    var onOpenSession: (() -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// The phone's own color scheme override (`system`, `light`, `dark`). It lives here
@@ -44,7 +45,12 @@ struct SettingsView: View {
                     }
                     category("Memory", icon: "cylinder") {
                         MemorySettingsView(onOpenSession: { id in
-                            Task { if await model.resume(id) { dismiss() } }
+                            Task {
+                                if await model.resume(id) {
+                                    dismiss()
+                                    onOpenSession?()
+                                }
+                            }
                         })
                     }
                     category("Gateways", icon: "server.rack") {
@@ -54,7 +60,10 @@ struct SettingsView: View {
                         WebSettingsView()
                     }
                     category("Tools", icon: "wrench.and.screwdriver") {
-                        ToolsSettingsView()
+                        ToolsSettingsView(onOpenSession: {
+                            dismiss()
+                            onOpenSession?()
+                        })
                     }
                     category("Permissions", icon: "shield") {
                         PermissionsSettingsView()
@@ -104,10 +113,16 @@ struct SettingsView: View {
                 }
             }
             .task { await model.loadSettings() }
+            .onChange(of: model.onlineEpoch) { _, _ in
+                Task { await model.loadSettings() }
+            }
         }
         .tint(MiloTheme.accent)
         .preferredColorScheme(colorScheme)
         .presentationBackground(MiloTheme.background)
+        .overlay(alignment: .top) {
+            MiloNoteToast(topPadding: 52)
+        }
     }
 
     /// One category: its icon, its name, and the page behind it. Nothing about what is
@@ -242,6 +257,7 @@ private struct ProviderSettingsView: View {
 
 private struct ToolsSettingsView: View {
     @Environment(AppModel.self) private var model
+    var onOpenSession: (() -> Void)? = nil
 
     var body: some View {
         List {
@@ -260,6 +276,11 @@ private struct ToolsSettingsView: View {
                     BrowserSettingsView()
                 } label: {
                     LabeledContent("Browser", value: model.browserEnabled ? "On" : "Off")
+                }
+                NavigationLink {
+                    ComputerUseSettingsView(onOpenSession: onOpenSession)
+                } label: {
+                    LabeledContent("Computer Use", value: model.computerEnabled ? "On" : "Off")
                 }
                 NavigationLink {
                     McpSettingsView()
@@ -584,6 +605,8 @@ private struct MemorySettingsView: View {
         }
         .navigationTitle("Memory")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .miloWallpaperBackground()
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -604,7 +627,10 @@ private struct MemorySettingsView: View {
         .onChange(of: recallFocused) { _, focused in
             if !focused { commitRecallLimit() }
         }
-        .task(id: "\(noteQuery)\u{0}\(noteOffset)") {
+        .task(id: model.accountDisplay) {
+            await model.ensureSettingsLoaded()
+        }
+        .task(id: "\(model.accountDisplay)\u{0}\(noteQuery)\u{0}\(noteOffset)") {
             await model.loadMemoryNotes(query: noteQuery, offset: noteOffset)
         }
         .alert("Edit note", isPresented: Binding(get: { editingNote != nil }, set: { if !$0 { editingNote = nil } })) {
@@ -725,6 +751,180 @@ private struct GoogleSettingsView: View {
         Binding(
             get: { model.googleEnabled },
             set: { value in Task { await model.setGoogleEnabled(value) } }
+        )
+    }
+}
+
+// MARK: - Computer Use
+
+private struct ComputerUseSettingsView: View {
+    @Environment(AppModel.self) private var model
+    var onOpenSession: (() -> Void)? = nil
+    @State private var startingHelp = false
+    @State private var checkingStatus = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                enableSection
+                hostStatusSection
+                if let error = model.settingsError {
+                    MiloErrorPill(text: error)
+                }
+            }
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.vertical, MiloTheme.Space.four)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
+        }
+        .miloWallpaperBackground()
+        .navigationTitle("Computer Use")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: model.accountDisplay) {
+            await model.ensureSettingsLoaded()
+        }
+    }
+
+    private var enableSection: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Toggle(isOn: enabled) {
+                Text("Enable Computer Use")
+                    .font(MiloTheme.Text.body)
+                    .foregroundStyle(MiloTheme.foreground)
+            }
+            .tint(MiloTheme.accent)
+            .padding(.horizontal, MiloTheme.Space.four)
+            .padding(.vertical, MiloTheme.Space.three)
+            .miloGlassCard(radius: MiloTheme.Radius.xl)
+
+            Text("Restart Milo to apply Computer Use enablement changes. In Ask and Auto modes, approval covers observing one window for the current turn and each action asks separately; Unrestricted mode runs both without prompting.")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+                .padding(.horizontal, MiloTheme.Space.two)
+        }
+    }
+
+    private var hostStatusSection: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            Text("Host status")
+                .font(MiloTheme.Text.small.weight(.semibold))
+                .foregroundStyle(MiloTheme.muted)
+                .padding(.horizontal, MiloTheme.Space.two)
+
+            if let status = model.computerStatus {
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Text("Backend")
+                            .font(MiloTheme.Text.base.weight(.medium))
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                        Spacer(minLength: MiloTheme.Space.two)
+                        backendBadge(ready: status.available)
+                    }
+
+                    Text(status.summary)
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(MiloTheme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let reason = status.reason, !status.available {
+                        Text(reason)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !status.limitations.isEmpty {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                            ForEach(status.limitations, id: \.self) { limitation in
+                                Text(limitation)
+                                    .font(MiloTheme.Text.small)
+                                    .foregroundStyle(MiloTheme.mutedStrong)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(MiloTheme.Space.four)
+                .miloGlassCard(radius: MiloTheme.Radius.xl)
+
+                GlassEffectContainer(spacing: MiloTheme.Space.three) {
+                    VStack(spacing: MiloTheme.Space.three) {
+                        if let help = status.setupHelp {
+                            MiloWideButton(
+                                title: startingHelp ? "Opening…" : help.label,
+                                systemImage: startingHelp ? nil : "sparkles",
+                                primary: true,
+                                busy: startingHelp
+                            ) {
+                                guard !startingHelp, !checkingStatus else { return }
+                                startingHelp = true
+                                Task {
+                                    defer { startingHelp = false }
+                                    if await model.startSessionWithPrompt(help.prompt) {
+                                        onOpenSession?()
+                                    }
+                                }
+                            }
+                        }
+
+                        MiloWideButton(
+                            title: checkingStatus ? "Checking…" : "Check status",
+                            systemImage: checkingStatus ? nil : "arrow.clockwise",
+                            busy: checkingStatus
+                        ) {
+                            guard !checkingStatus, !startingHelp else { return }
+                            checkingStatus = true
+                            Task {
+                                defer { checkingStatus = false }
+                                await model.checkComputerStatus()
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Run a status check to inspect the host backend, screen capture, AT-SPI, and Hyprland plugin.")
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.mutedStrong)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(MiloTheme.Space.four)
+                    .miloGlassCard(radius: MiloTheme.Radius.xl)
+
+                MiloWideButton(
+                    title: checkingStatus ? "Checking…" : "Check status",
+                    systemImage: checkingStatus ? nil : "arrow.clockwise",
+                    busy: checkingStatus
+                ) {
+                    guard !checkingStatus else { return }
+                    checkingStatus = true
+                    Task {
+                        defer { checkingStatus = false }
+                        await model.checkComputerStatus()
+                    }
+                }
+            }
+        }
+    }
+
+    private func backendBadge(ready: Bool) -> some View {
+        let tone = ready ? MiloTheme.success : MiloTheme.danger
+        return HStack(spacing: MiloTheme.Space.one) {
+            Circle()
+                .fill(tone)
+                .frame(width: 7, height: 7)
+            Text(ready ? "Ready" : "Unavailable")
+                .font(MiloTheme.Text.small.weight(.semibold))
+                .foregroundStyle(tone)
+        }
+        .padding(.horizontal, MiloTheme.Space.three)
+        .padding(.vertical, MiloTheme.Space.one)
+        .background(tone.opacity(0.14), in: Capsule())
+    }
+
+    private var enabled: Binding<Bool> {
+        Binding(
+            get: { model.computerEnabled },
+            set: { value in Task { await model.setComputerEnabled(value) } }
         )
     }
 }
@@ -1123,7 +1323,12 @@ private struct SkillsSettingsView: View {
         }
         .navigationTitle("Skills")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.loadPopularSkills() }
+        .scrollContentBackground(.hidden)
+        .miloWallpaperBackground()
+        .task(id: model.accountDisplay) {
+            await model.ensureSettingsLoaded()
+            await model.loadPopularSkills()
+        }
     }
 
     private func install(skill: String?) async {

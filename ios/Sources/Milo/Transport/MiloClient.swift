@@ -141,7 +141,7 @@ final class MiloClient {
                   withJSONObject: ClientFrame.hello(chatId: account.chatId).json
               )
         else { return }
-        state = .connecting
+        state = everOnline ? .offline : .connecting
         let task = URLSession.shared.webSocketTask(with: url)
         socket = task
         task.resume()

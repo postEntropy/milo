@@ -8,6 +8,7 @@ struct ProjectRulesSection: View {
     @Environment(AppModel.self) private var model
     @State private var rules: ProjectRules?
     @State private var error: String?
+    @State private var errorIsConnection = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
@@ -15,7 +16,7 @@ struct ProjectRulesSection: View {
                 .font(MiloTheme.Text.title)
                 .foregroundStyle(MiloTheme.foreground)
 
-            if let error {
+            if let error, !(errorIsConnection && model.connectionLine != nil) {
                 MiloErrorPill(text: error)
             } else if let rules {
                 if rules.carriesRules {
@@ -60,14 +61,24 @@ struct ProjectRulesSection: View {
         // The daemon said a piece of work moved — the same signal the running dot follows —
         // so the folder is read again rather than left as it was before the turn.
         .onChange(of: model.workMoved) { _, _ in Task { await read() } }
+        .onChange(of: model.onlineEpoch) { _, _ in Task { await read() } }
     }
 
     private func read() async {
         do {
             rules = try await model.projectRules(projectId)
             error = nil
+            errorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if model.consumeConnectionError(error) {
+                self.error = nil
+                self.errorIsConnection = false
+            } else {
+                self.errorIsConnection = AppModel.isConnectionError(error)
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 }

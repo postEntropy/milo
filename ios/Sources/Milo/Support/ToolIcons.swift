@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The mark shared by the Crew drawer tab and bot-management tool lines.
 struct CrewDrawerMark: View {
@@ -28,6 +29,54 @@ struct CrewDrawerMark: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    /// Renders `CrewDrawerMark` as a template `UIImage` so a pinned Crew tab uses the
+    /// exact same mark as the Hub, optically sized and centered inside a 26pt tab canvas.
+    @MainActor
+    static func tabImage(size: CGFloat = 25, canvasSize: CGFloat = 26) -> UIImage {
+        let canvas = CGSize(width: canvasSize, height: canvasSize)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: canvas, format: format)
+        return renderer.image { context in
+            let cg = context.cgContext
+            let s = size / 24.0
+            // Vertical ink spans y=1.8 (antenna top) to y=21.9 (head bottom stroke), mid=11.85.
+            let dx = (canvasSize - size) / 2
+            let dy = (canvasSize - size) / 2 + (12.0 - 11.85) * s
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: dx + x * s, y: dy + y * s) }
+            func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
+                CGRect(x: dx + x * s, y: dy + y * s, width: w * s, height: h * s)
+            }
+
+            UIColor.black.setStroke()
+            UIColor.black.setFill()
+            cg.setLineWidth(1.8 * s)
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+
+            let head = UIBezierPath(roundedRect: rect(4, 7, 16, 14), cornerRadius: 5.5 * s)
+            head.lineWidth = 1.8 * s
+            head.lineCapStyle = .round
+            head.lineJoinStyle = .round
+            head.stroke()
+
+            let lines = UIBezierPath()
+            lines.move(to: pt(12, 7))
+            lines.addLine(to: pt(12, 4))
+            lines.move(to: pt(2.5, 12.5))
+            lines.addLine(to: pt(2.5, 15.5))
+            lines.move(to: pt(21.5, 12.5))
+            lines.addLine(to: pt(21.5, 15.5))
+            lines.lineWidth = 1.8 * s
+            lines.lineCapStyle = .round
+            lines.stroke()
+
+            UIBezierPath(ovalIn: rect(10.8, 1.8, 2.4, 2.4)).fill()
+            UIBezierPath(roundedRect: rect(8.3, 11.5, 2.4, 5), cornerRadius: 1.2 * s).fill()
+            UIBezierPath(roundedRect: rect(13.3, 11.5, 2.4, 5), cornerRadius: 1.2 * s).fill()
+        }.withRenderingMode(.alwaysTemplate)
     }
 }
 
@@ -83,6 +132,10 @@ enum ToolIcons {
         "browser_snapshot": "eye",
         "browser_screenshot": "camera",
         "browser_act": "cursorarrow",
+        "computer_list": "macwindow.on.rectangle",
+        "computer_open": "macwindow",
+        "computer_snapshot": "eye",
+        "computer_act": "cursorarrow",
         // Every email tool wears the one mail mark, so a call reads the same whichever
         // of them ran — the page of the mailbox, not the verb.
         "gmail_search": "envelope",
@@ -135,6 +188,10 @@ enum ToolIcons {
         "browser_snapshot": "Snapshot",
         "browser_screenshot": "Screenshot",
         "browser_act": "Browser",
+        "computer_list": "Listed windows",
+        "computer_open": "Opened window",
+        "computer_snapshot": "Observed window",
+        "computer_act": "Desktop",
         "gmail_search": "Searched email",
         "gmail_read": "Read email",
         "gmail_modify": "Modified email",
@@ -152,6 +209,32 @@ enum ToolIcons {
         return symbols[name] ?? "gearshape"
     }
 
+    /// Pending-action headings for approval prompts, matching the server's `toolApprovalTitle`.
+    private static let approvalTitles: [String: String] = [
+        "computer_open": "Allow window access",
+        "computer_act": "Allow desktop action",
+        "shell_command": "Allow shell command",
+        "write_file": "Allow writing file",
+        "edit_file": "Allow editing file",
+        "apply_patch": "Allow applying patch",
+        "format": "Allow formatting",
+        "git_commit": "Allow git commit",
+        "gmail_send": "Allow sending email",
+        "gmail_draft": "Allow drafting email",
+        "gmail_modify": "Allow modifying email",
+        "mail_labels": "Allow email label change",
+        "browser_open": "Allow opening page",
+        "browser_act": "Allow browser action",
+        "routine": "Allow routine change",
+        "delegated_work": "Allow delegated work",
+        "crew": "Allow crew change",
+        "sessions": "Allow session change",
+        "instructions": "Allow instruction change",
+        "memories": "Allow memory change",
+        "job_kill": "Allow stopping job",
+        "send_file": "Allow sending file",
+    ]
+
     /// The human-readable label for a tool name, matching the server's `toolDisplayName`.
     static func label(_ name: String) -> String {
         if let label = labels[name] { return label }
@@ -160,5 +243,10 @@ enum ToolIcons {
             if parts.count == 2 { return "\(parts[0]): \(parts[1])" }
         }
         return name
+    }
+
+    /// Pending-action heading for an approval prompt, matching `toolApprovalTitle`.
+    static func approvalTitle(_ name: String) -> String {
+        approvalTitles[name] ?? "Allow \(label(name))"
     }
 }

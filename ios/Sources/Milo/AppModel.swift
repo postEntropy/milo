@@ -133,6 +133,7 @@ final class AppModel {
             note = Note("Wait for the session to finish opening.")
             return false
         }
+        cancelPendingRestoration()
         let id = UUID().uuidString
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var message = Message(isUser: true, parts: trimmed.isEmpty ? [] : [.text(trimmed)], attachments: [], drafts: drafts, streaming: false)
@@ -207,6 +208,16 @@ final class AppModel {
     /// unread: it arrived after the person left the chat.
     @ObservationIgnored var threadOnScreen = true
 
+    func setThreadOnScreen(_ visible: Bool) {
+        let wasVisible = threadOnScreen
+        threadOnScreen = visible
+        if visible, !wasVisible, !sessionId.isEmpty,
+           UIApplication.shared.applicationState == .active,
+           pendingRestoreSessionId == nil || sessionId == pendingRestoreSessionId {
+            Task { await markSeen(sessionId) }
+        }
+    }
+
     /// The running model without its vendor prefix, from the catalog's projected
     /// label when loaded or after the last `/` before the picker has been opened.
     var modelLabel: String {
@@ -232,6 +243,9 @@ final class AppModel {
      */
     private(set) var workMoved = 0
     private(set) var connection: MiloClient.State = .idle
+    /// Incremented each time the socket reaches `.online`, so screens that failed or
+    /// missed data while offline can reload as soon as the daemon is reachable again.
+    private(set) var onlineEpoch = 0
     /**
      Whether the socket is worth a line yet. Held back for a moment: leaving the app
      drops the socket and coming back dials again in a second or two, and a line that
@@ -378,10 +392,23 @@ final class AppModel {
     /// speaking to the new session, together with the names of whatever files it carried —
     /// the bytes are already with the daemon, so the ids are what is left to hand over.
     private var owed: String?
+    private var owedSessionId: String?
     private var owedIntent: ClientFrame.Intent?
     private var owedUploads: [String] = []
     private var owedMentions: [MessageMentionRef] = []
+
+    private func clearOwed() {
+        owed = nil
+        owedSessionId = nil
+        owedIntent = nil
+        owedUploads = []
+        owedMentions = []
+    }
     private var reopening = false
+    private var started = false
+    private var pendingRestoreSessionId: String?
+    private var restoringSession = false
+    private var restorationEpoch = 0
     /// Whether the thread on screen is the one being left, kept until the socket hands
     /// over the session being opened. It tells the handshake's own "the person already
     /// spoke in this fresh session" rule that these words are not that session's.
@@ -390,6 +417,15 @@ final class AppModel {
     private var account: Account? {
         if case .chat(let account) = phase { return account }
         return nil
+    }
+
+    var accountDisplay: String {
+        account?.display ?? ""
+    }
+
+    func fetchToolPreview(id: String, callId: String) async -> ToolPreviewResult {
+        guard let account, !callId.isEmpty, !sessionId.isEmpty else { return .unavailable }
+        return await MiloApi.fetchToolPreview(account, id: id, callId: callId, sessionId: sessionId)
     }
 
     func reconnect() {
@@ -438,6 +474,11 @@ final class AppModel {
         switch state {
         case .online:
             clearHold()
+            onlineEpoch += 1
+            if pendingRestoreSessionId != nil {
+                Task { await retryPendingRestoreIfNeeded() }
+            }
+            Task { await refreshSessions() }
             Task { await refreshTaskLists() }
             Task { await refreshProjects() }
             Task { await refreshRoutines() }
@@ -451,10 +492,7 @@ final class AppModel {
             if reopening {
                 reopening = false
                 if owed != nil {
-                    owed = nil
-                    owedIntent = nil
-                    owedUploads = []
-                    owedMentions = []
+                    clearOwed()
                     busy = false
                     unsent()
                 }
@@ -478,6 +516,21 @@ final class AppModel {
         connectionSaid = false
     }
 
+    static func isConnectionError(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case ApiError.unreachable = error { return true }
+        return false
+    }
+
+    /// Consumes a transport reachability error when the socket is already down or
+    /// reconnecting, surfacing `ConnectionPill` immediately instead of drawing a second
+    /// disconnection alert on the active screen.
+    func consumeConnectionError(_ error: Error) -> Bool {
+        guard Self.isConnectionError(error), connection != .online else { return false }
+        connectionSaid = true
+        return true
+    }
+
     /// What a call that came back wrong has to say. One place, so every failure reads
     /// the same way — the daemon's own words when it gave a reason, the system's
     /// otherwise.
@@ -485,14 +538,102 @@ final class AppModel {
         note = Note((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
     }
 
-    /// The app opens on a new session, ready to type into. The socket is opened
-    /// either way: if the daemon could not start a session, the note says so and
-    /// the last bound one is what the socket replays.
+    private enum RestoreOutcome {
+        case restored
+        case transientFailure
+        case confirmedMissing
+        case superseded
+    }
+
+    private static func isConfirmedMissingSession(_ error: Error) -> Bool {
+        guard case ApiError.httpStatus(let status, let message) = error,
+              let message, !message.isEmpty else {
+            return false
+        }
+        return status == 404 || status == 400
+    }
+
+    private func cancelPendingRestoration() {
+        restorationEpoch += 1
+        pendingRestoreSessionId = nil
+    }
+
+    /// Runs the initial session bind once when the authenticated shell opens so switching
+    /// tabs never restarts the open session.
+    func start(at account: Account) async {
+        guard !started else { return }
+        started = true
+        let opened = await openPendingSession()
+        if !opened {
+            await begin(at: account)
+        }
+        await refreshSessions()
+    }
+
+    /// Reopens the last active session when one is remembered, or starts a fresh one
+    /// otherwise. Preserves the remembered session across transient failures (offline,
+    /// HTTP 502, invalid gateway responses) and only falls back to a new session when the
+    /// daemon confirms the saved one no longer exists.
     func begin(at account: Account) async {
-        // Opened on a fresh conversation, like every other session this app opens: the
-        // app starts on a new session, and a conversation the daemon is still bound to
-        // — one with a turn that outlived the app running on it — would otherwise
-        // replay that session instead of a new one.
+        if let savedId = AccountStore.lastSessionId {
+            pendingRestoreSessionId = savedId
+            let outcome = await attemptRestore(savedId, at: account, epoch: restorationEpoch)
+            switch outcome {
+            case .restored, .superseded:
+                return
+            case .transientFailure:
+                connectionSaid = true
+                client.connect(to: account)
+                return
+            case .confirmedMissing:
+                AccountStore.lastSessionId = nil
+                pendingRestoreSessionId = nil
+            }
+        }
+        await openInitialFreshSession(at: account)
+    }
+
+    func retryPendingRestoreIfNeeded() async {
+        guard !restoringSession,
+              connection == .online,
+              let restoreId = pendingRestoreSessionId,
+              let account else { return }
+        let epoch = restorationEpoch
+        let outcome = await attemptRestore(restoreId, at: account, epoch: epoch)
+        switch outcome {
+        case .restored, .superseded, .transientFailure:
+            break
+        case .confirmedMissing:
+            AccountStore.lastSessionId = nil
+            pendingRestoreSessionId = nil
+            await openInitialFreshSession(at: account)
+        }
+    }
+
+    private func attemptRestore(_ id: String, at account: Account, epoch: Int) async -> RestoreOutcome {
+        restoringSession = true
+        defer { restoringSession = false }
+        var next = account
+        next.chatId = AccountStore.freshChatId()
+        do {
+            try await MiloApi.resumeSession(next, id: id)
+            guard epoch == restorationEpoch, pendingRestoreSessionId == id else { return .superseded }
+            pendingRestoreSessionId = nil
+            AccountStore.save(next)
+            AccountStore.lastSessionId = id
+            phase = .chat(next)
+            await reopen(next)
+            return .restored
+        } catch {
+            guard epoch == restorationEpoch, pendingRestoreSessionId == id else { return .superseded }
+            if Self.isConfirmedMissingSession(error) {
+                return .confirmedMissing
+            }
+            return .transientFailure
+        }
+    }
+
+    private func openInitialFreshSession(at account: Account) async {
         reopening = true
         var next = account
         next.chatId = AccountStore.freshChatId()
@@ -577,6 +718,9 @@ final class AppModel {
     func unpair() {
         client.disconnect()
         AccountStore.clear()
+        started = false
+        cancelPendingRestoration()
+        restoringSession = false
         messages = []
         threadKept = false
         sessions = []
@@ -592,6 +736,40 @@ final class AppModel {
         panel = nil
         pending = nil
         note = nil
+        settingsRequest += 1
+        settingsLoadedForDaemon = nil
+        settingsLoading = false
+        settingsError = nil
+        auth = nil
+        presets = []
+        chatGpt = nil
+        chatGptLogin = nil
+        chatGptPoll?.cancel()
+        chatGptPoll = nil
+        gateways = [:]
+        memoryRecallLimit = nil
+        memoryDerive = true
+        memoryEmbedding = nil
+        memoryStats = nil
+        memoryNotesRequest += 1
+        memoryNotes = nil
+        memoryNotesMore = false
+        installedSkills = []
+        popularSkillsRequest += 1
+        popularSkillsLoadedForDaemon = nil
+        popularSkills = []
+        popularSkillsLoading = false
+        skillChoices = nil
+        mcpReport = nil
+        googleReport = nil
+        detectedBrowsers = nil
+        detectedProfiles = nil
+        setupJob = nil
+        models = []
+        providers = []
+        modelsError = nil
+        modelName = ""
+        providerId = ""
         phase = .pairing
         // Nothing is running for this phone any more, so the system's hold on the turn goes
         // with the install rather than keeping the phone awake for a daemon it has left.
@@ -617,6 +795,7 @@ final class AppModel {
         // The chat exists only inside a bound install, so this is the account the upload
         // goes to rather than a second source for one.
         guard let account else { return }
+        cancelPendingRestoration()
         // Words typed into the session being opened are the first thing said there: the
         // thread kept from the one being left goes at once, and the empty id makes this
         // bubble the thing the handshake leaves alone — the fresh-session path exactly.
@@ -998,28 +1177,40 @@ final class AppModel {
     }
 
     func newSession() async {
-        guard let account else { return }
+        _ = await startFreshSession(prompt: nil)
+    }
+
+    @discardableResult
+    func startSessionWithPrompt(_ prompt: String) async -> Bool {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return await startFreshSession(prompt: trimmed)
+    }
+
+    private func startFreshSession(prompt: String?) async -> Bool {
+        guard let account else { return false }
+        cancelPendingRestoration()
         // Clear the screen in the same frame the person pressed New session, so the old
         // thread does not linger while the drawer closes and the keyboard rises.
         reopening = true
-        owed = nil
-        owedIntent = nil
-        owedUploads = []
-        owedMentions = []
+        clearOwed()
+        owed = prompt
         resetSessionState()
-        let opened = await openFresh(account) { try await MiloApi.newSession($0) }
+        let opened = await openFresh(account) {
+            let id = try await MiloApi.newSession($0)
+            if prompt != nil { owedSessionId = id }
+        }
         if !opened {
             reopening = false
-            owed = nil
-            owedIntent = nil
-            owedUploads = []
-            owedMentions = []
+            clearOwed()
             client.connect(to: account)
         }
+        return opened
     }
 
     @discardableResult
     func resume(_ id: String) async -> Bool {
+        cancelPendingRestoration()
         // The selected row can still be tapped while its drawer is open. If it is already
         // this session, dismiss the drawer without rebinding the socket or replaying the
         // whole transcript under the person's finger.
@@ -1090,7 +1281,12 @@ final class AppModel {
             // to remove the session its conversation is bound to, and ending up on one
             // the delete removed is worse than not deleting at all — the browser's own
             // order, for the browser's own reason.
+            if id == pendingRestoreSessionId || id == AccountStore.lastSessionId {
+                cancelPendingRestoration()
+                AccountStore.lastSessionId = nil
+            }
             if id == sessionId {
+                cancelPendingRestoration()
                 // Onto a fresh conversation, so the move lands even while a turn runs
                 // on the session being left.
                 var next = account
@@ -1202,10 +1398,10 @@ final class AppModel {
     @discardableResult
     private func fork(from turn: Int, then prompt: String?, mentions: [MessageMentionRef] = []) async -> Bool {
         guard let account, !sessionId.isEmpty else { return false }
+        cancelPendingRestoration()
         let from = sessionId
+        clearOwed()
         owed = prompt
-        owedIntent = nil
-        owedUploads = []
         owedMentions = mentions
         var next = account
         next.chatId = AccountStore.freshChatId()
@@ -1216,9 +1412,7 @@ final class AppModel {
             await reopen(next)
             return true
         } catch {
-            owed = nil
-            owedUploads = []
-            owedMentions = []
+            clearOwed()
             failed(error)
             return false
         }
@@ -1239,6 +1433,9 @@ final class AppModel {
             // until the handshake names the next, and an id going out and back in
             // would make the thread jump to its top under the card.
             sessionId = ""
+            if pendingRestoreSessionId == nil {
+                AccountStore.lastSessionId = nil
+            }
             sessionBackend = nil
         }
         pending = nil
@@ -1292,8 +1489,14 @@ final class AppModel {
             routines = try await MiloApi.routines(account)
             routinesError = nil
             await notifications.sync(routines)
+        } catch is CancellationError {
+            return
         } catch {
-            routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if consumeConnectionError(error) {
+                routinesError = nil
+            } else {
+                routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
@@ -1386,8 +1589,14 @@ final class AppModel {
         do {
             taskLists = try await MiloApi.taskLists(account)
             taskListsError = nil
+        } catch is CancellationError {
+            return
         } catch {
-            taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if consumeConnectionError(error) {
+                taskListsError = nil
+            } else {
+                taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
@@ -1456,6 +1665,7 @@ final class AppModel {
             showNote("Wait for the Session to finish before changing its folder.")
             return false
         }
+        cancelPendingRestoration()
         do {
             try await MiloApi.setSessionFolder(account, id: sessionId, path: path)
             await reopen(account)
@@ -1623,43 +1833,15 @@ final class AppModel {
     @discardableResult
     func startWorkSession(project: String, plan: Bool = false, backend: String = "milo", confirmed: Bool = false) async -> Bool {
         guard let account else { return false }
-        reopening = true
-        owed = nil
-        owedIntent = nil
-        owedUploads = []
-        owedMentions = []
-        resetSessionState()
-        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan, backend: backend, confirmed: confirmed) }
-        if !opened {
-            reopening = false
-            owed = nil
-            owedIntent = nil
-            owedUploads = []
-            owedMentions = []
-            client.connect(to: account)
-        }
-        return opened
+        cancelPendingRestoration()
+        return await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan, backend: backend, confirmed: confirmed) }
     }
 
     @discardableResult
     func startBotSession(botId: String) async -> Bool {
         guard let account else { return false }
-        reopening = true
-        owed = nil
-        owedIntent = nil
-        owedUploads = []
-        owedMentions = []
-        resetSessionState()
-        let opened = await openFresh(account) { try await MiloApi.newSession($0, botId: botId) }
-        if !opened {
-            reopening = false
-            owed = nil
-            owedIntent = nil
-            owedUploads = []
-            owedMentions = []
-            client.connect(to: account)
-        }
-        return opened
+        cancelPendingRestoration()
+        return await openFresh(account) { try await MiloApi.newSession($0, botId: botId) }
     }
 
     func refreshCrewBots() async {
@@ -1851,6 +2033,8 @@ final class AppModel {
     private(set) var browserProfileDir: String?
     private(set) var browserCdpUrl: String?
     private(set) var browserKeepSnapshots = 3
+    private(set) var computerEnabled = false
+    private(set) var computerStatus: SettingsOverview.ComputerStatus?
     private(set) var detectedBrowsers: [DetectedBrowser]?
     private(set) var detectedProfiles: [DetectedProfile]?
     private(set) var mcpReport: McpReport?
@@ -1860,6 +2044,10 @@ final class AppModel {
     private(set) var popularSkills: [PopularSkill] = []
     private(set) var popularSkillsLoading = false
     private(set) var skillChoices: [String]?
+    private var popularSkillsLoadedForDaemon: String?
+    private var popularSkillsRequest = 0
+    private(set) var settingsLoadedForDaemon: String?
+    private var settingsRequest = 0
 
     // Long-running setup job (embeddings, browser download, profile copy, MCP check)
     private(set) var setupJob: SetupJobStatus?
@@ -1872,15 +2060,26 @@ final class AppModel {
     private(set) var efforts: [String] = []
     private(set) var searchProviders: [String] = []
 
+    func ensureSettingsLoaded() async {
+        guard let account else { return }
+        if settingsLoadedForDaemon != account.display {
+            await loadSettings()
+        }
+    }
+
     /// Reads the whole screen in one call. What the runtime is running wins over
     /// what the file says: a chat command moves the running one first.
     func loadSettings() async {
         guard let account else { return }
+        let daemon = account.display
+        settingsRequest += 1
+        let request = settingsRequest
         settingsLoading = true
         settingsError = nil
-        defer { settingsLoading = false }
+        defer { if request == settingsRequest { settingsLoading = false } }
         do {
             let overview = try await MiloApi.overview(account)
+            guard request == settingsRequest, self.account?.display == daemon else { return }
             if modelName.isEmpty, let running = overview.live?.model, !running.isEmpty {
                 modelName = running
             }
@@ -1956,17 +2155,27 @@ final class AppModel {
             browserProfileDir = overview.config?.browser?.profileDir
             browserCdpUrl = overview.config?.browser?.cdpUrl
             browserKeepSnapshots = overview.config?.browser?.keepSnapshots ?? 3
+            computerEnabled = overview.config?.computer?.enabled ?? false
+            computerStatus = overview.computer
             mcpReport = overview.mcp
 
             installedSkills = overview.skills ?? []
+            settingsLoadedForDaemon = daemon
 
             permissionModes = overview.options?.permissionModes ?? [permissionMode]
             toolLevels = overview.options?.toolLevels ?? [toolDisplay]
             thinkingLevels = overview.options?.thinkingLevels ?? [thinking]
             efforts = overview.options?.efforts ?? [effort]
             searchProviders = overview.options?.searchProviders ?? [searchProvider]
+        } catch is CancellationError {
+            return
         } catch {
-            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            guard request == settingsRequest, self.account?.display == daemon else { return }
+            if consumeConnectionError(error) {
+                settingsError = nil
+            } else {
+                settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
@@ -2244,16 +2453,23 @@ final class AppModel {
 
     func loadMemoryNotes(query: String = "", offset: Int = 0) async {
         guard let account else { return }
+        let daemon = account.display
         memoryNotesRequest += 1
         let request = memoryNotesRequest
         do {
             let page = try await MiloApi.memoryNotes(account, query: query, offset: offset)
-            guard request == memoryNotesRequest else { return }
+            guard request == memoryNotesRequest, self.account?.display == daemon else { return }
             memoryNotes = page.notes
             memoryNotesMore = page.hasMore
+        } catch is CancellationError {
+            return
         } catch {
-            guard request == memoryNotesRequest else { return }
-            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            guard request == memoryNotesRequest, self.account?.display == daemon else { return }
+            if consumeConnectionError(error) {
+                settingsError = nil
+            } else {
+                settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
@@ -2284,6 +2500,22 @@ final class AppModel {
         guard await write({ try await MiloApi.saveConfig($0, ["browser": ["enabled": value]]) })
         else { return }
         browserEnabled = value
+    }
+
+    func setComputerEnabled(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["computer": ["enabled": value]]) })
+        else { return }
+        computerEnabled = value
+    }
+
+    func checkComputerStatus() async {
+        guard let account else { return }
+        do {
+            computerStatus = try await MiloApi.computerStatus(account)
+            settingsError = nil
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     func setBrowserHeadless(_ value: Bool) async {
@@ -2367,11 +2599,16 @@ final class AppModel {
     }
 
     func loadPopularSkills() async {
-        guard let account, popularSkills.isEmpty, !popularSkillsLoading else { return }
+        guard let account, popularSkillsLoadedForDaemon != account.display, !popularSkillsLoading else { return }
+        let daemon = account.display
+        popularSkillsRequest += 1
+        let request = popularSkillsRequest
         popularSkillsLoading = true
-        defer { popularSkillsLoading = false }
+        defer { if request == popularSkillsRequest { popularSkillsLoading = false } }
         if let list = try? await MiloApi.popularSkills(account) {
+            guard request == popularSkillsRequest, self.account?.display == daemon else { return }
             popularSkills = list
+            popularSkillsLoadedForDaemon = daemon
         }
     }
 
@@ -2510,6 +2747,10 @@ final class AppModel {
         // app's own terms — reported as complete — rather than being surprised by a
         // cancellation, and the interface it draws goes away with it.
         continuedTurn.end()
+        if threadOnScreen, !sessionId.isEmpty,
+           pendingRestoreSessionId == nil || sessionId == pendingRestoreSessionId {
+            Task { await markSeen(sessionId) }
+        }
     }
 
     private func releaseBackgroundHold() {
@@ -2607,8 +2848,22 @@ final class AppModel {
             // ever being read — which is where this was left at its own default.
             thinking = ready.thinking
             sessionId = ready.sessionId
-            // It is on the screen now, wherever it was opened from.
-            Task { await markSeen(ready.sessionId) }
+            if let pendingRestore = pendingRestoreSessionId {
+                if ready.sessionId == pendingRestore {
+                    pendingRestoreSessionId = nil
+                    AccountStore.lastSessionId = ready.sessionId
+                    if threadOnScreen, UIApplication.shared.applicationState == .active {
+                        Task { await markSeen(ready.sessionId) }
+                    }
+                } else {
+                    Task { await retryPendingRestoreIfNeeded() }
+                }
+            } else {
+                AccountStore.lastSessionId = ready.sessionId
+                if threadOnScreen, UIApplication.shared.applicationState == .active {
+                    Task { await markSeen(ready.sessionId) }
+                }
+            }
             note = nil
             pending = nil
             queued = 0
@@ -2632,14 +2887,11 @@ final class AppModel {
             }
             // The words a fork or an early send owes go out now that the socket is ready,
             // with the names of whatever files it carried.
-            if let owed {
+            if let owed, owedSessionId == nil || owedSessionId == ready.sessionId {
                 let intent = owedIntent
                 let uploads = owedUploads
                 let mentions = owedMentions
-                self.owed = nil
-                self.owedIntent = nil
-                self.owedUploads = []
-                self.owedMentions = []
+                clearOwed()
                 // The bubble is already on screen when this screen holds the thread, and
                 // also when the files waited here with the ids they had already earned — a
                 // file cannot be picked a second time, so the words go out on the bubble
@@ -2743,6 +2995,9 @@ final class AppModel {
         case .commandResult(let result):
             if let nextSessionId = result.sessionId, nextSessionId != sessionId {
                 sessionId = nextSessionId
+                if pendingRestoreSessionId == nil {
+                    AccountStore.lastSessionId = nextSessionId
+                }
                 sessionBot = result.bot
             }
             // The reply as prose, preferring the markdown the daemon rendered beside the
@@ -2908,7 +3163,7 @@ final class AppModel {
                 message.waiting = false
                 message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running", input: input)))
             }
-        case .toolEnd(_, let name, let isError, let drawFailure, let result, let change):
+        case .toolEnd(let id, let name, let isError, let drawFailure, let result, let change, let preview):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
                     if case .tool(let tool) = part { return tool.state == "running" && tool.name == name }
@@ -2916,7 +3171,7 @@ final class AppModel {
                 }
                 guard let index, case .tool(var tool) = parts[index] else {
                     if isError && drawFailure {
-                        parts.append(.tool(ToolMark(name: name, text: name, state: "failed")))
+                        parts.append(.tool(ToolMark(name: name, text: name, state: "failed", preview: preview, callId: id)))
                     }
                     return
                 }
@@ -2925,6 +3180,10 @@ final class AppModel {
                 // nothing, so only a real one is kept.
                 if let result, !result.isEmpty { tool.result = result }
                 if let change, !change.isEmpty { tool.change = change }
+                if let preview {
+                    tool.preview = preview
+                    tool.callId = id
+                }
                 parts[index] = .tool(tool)
             }
             // The result is in, so the model is thinking again about what to do with it:

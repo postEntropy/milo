@@ -36,6 +36,9 @@ struct ChatView: View {
     }
 
     let account: Account
+    let isActiveTab: Bool
+    let settingsOpen: Bool
+    let onOpenSettings: () -> Void
     @Environment(AppModel.self) private var model
     @State private var draft = ""
     @State private var pickedMentions: [PickedMention] = []
@@ -53,17 +56,6 @@ struct ChatView: View {
     @State private var drawer = false
     @State private var tracesTarget: SessionTracesTarget?
     @State private var picker = false
-    @State private var settings = false
-    @State private var routines = false
-    @State private var routinesSelected = false
-    @State private var tasks = false
-    @State private var tasksSelected = false
-    @State private var routinePage = false
-    @State private var taskPage = false
-    @State private var analytics = false
-    @State private var analyticsPage = false
-    @State private var crew = false
-    @State private var crewPage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -79,6 +71,8 @@ struct ChatView: View {
     /// Whether the thread is at its end, read off the scroll itself. What the arrow
     /// above the composer answers to.
     @State private var atEnd = true
+    @State private var following = true
+    @State private var placed = true
     /// How wide the screen is, so the panel can take a share of it rather than a fixed number
     /// of points — the same column on a phone and on a tablet.
     @State private var screenWidth: CGFloat = 0
@@ -96,30 +90,19 @@ struct ChatView: View {
     /// the platform clears it the moment the touch ends and the thread can never be left frozen
     /// by a swipe that was taken away.
     @GestureState private var touching = false
-    /// Whether the reply being written is carried along with the thread's end, so its newest
-    /// line stays in view. On wherever the person has left the thread at its end — their own
-    /// move takes it away, and coming back to the end gives it back.
-    ///
-    /// It lives with the rest of the scroll's own bookkeeping below: a scroll writes these
-    /// dozens of times a second, and a screen that re-rendered for each of them is what made
-    /// a long session stutter under the thumb — every pass let a lazy stack re-activate the
-    /// rows it was unsure of, and re-building one of them costs the whole row.
+    /// Keeps scroll measurements without invalidating the thread on each layout pass.
     @MainActor
     private final class ScrollBook {
         /// Whether the person is the one moving the thread — a finger in it, or the glide a
         /// flick left behind. It holds the following off until they have settled, so a reply
         /// is never carried along under their hand.
         var moving = false
-        /// Whether the thread is followed to its end as the reply grows.
-        var following = true
         /// The thread's own box, what the words in it take before the room is added, and
         /// where the send's own message sits inside it: what the room is measured from.
         var bare: CGFloat = 0
         var threadHeight: CGFloat = 0
         var viewportHeight: CGFloat = 0
         var sentTop: CGFloat?
-        /// Whether the scroll the room was opened for has already been made.
-        var placed = true
         /// Where that claim happened, in the hand's own travel, and where the touch began.
         var dragFrom: CGFloat = 0
         var touch: CGPoint?
@@ -253,7 +236,7 @@ struct ChatView: View {
                 .transition(.move(edge: .trailing))
             }
 
-            cardContent
+            chat
                 .accessibilityHidden(UIAccessibility.isVoiceOverRunning && (drawer || panelShown))
                 .scrollDisabled(touching && held == true)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -283,7 +266,7 @@ struct ChatView: View {
                         .ignoresSafeArea()
                 }
                 .overlay(alignment: .top) {
-                    if !routines && !tasks && !analytics && !crew && !model.messages.isEmpty {
+                    if !model.messages.isEmpty {
                         GeometryReader { geometry in
                             StatusBarBlur()
                                 .mask {
@@ -361,8 +344,7 @@ struct ChatView: View {
             accessibleSurface = open ? .panel : nil
         }
         .sessionDelete(deleteSession, isPresented: $deleting)
-        .overlay(alignment: .top) { noteToast }
-        .animation(.smooth(duration: 0.22), value: model.note)
+        .overlay(alignment: .top) { MiloNoteToast(topPadding: topbarHeight + MiloTheme.Space.two) }
         .animation(reduceMotion ? nil : Self.lidMove, value: rest)
         // The panel's own motion, in one place: the control that raises a panel and the layer
         // that dismisses it then cannot animate apart. Opening blooms with a gentle bounce;
@@ -451,14 +433,7 @@ struct ChatView: View {
         } action: { _, width in
             screenWidth = width
         }
-        .task {
-            composing = true
-            // A tap on a reply's notice names the session its answer is in, and that is the
-            // session to open — not the fresh one this app otherwise starts on.
-            let opened = await model.openPendingSession()
-            if !opened { await model.begin(at: account) }
-            await model.refreshSessions()
-        }
+        .toolbarVisibility(drawer || panelShown ? .hidden : .visible, for: .tabBar)
         // The strip answers words picked out of the thread on screen. When the session
         // changes — a new one started, another resumed — that passage is no longer there
         // to answer, so the strip goes with it instead of following into a session it was
@@ -485,7 +460,6 @@ struct ChatView: View {
             else { UserDefaults.standard.set(text, forKey: "milo-draft:\(draftSession)") }
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
-        .sheet(isPresented: $settings) { SettingsView(account: account) }
         .sheet(item: $tracesTarget) { target in
             SessionTracesSheet(account: account, sessionId: target.id, sessionTitle: target.title)
         }
@@ -500,38 +474,15 @@ struct ChatView: View {
         .onChange(of: panelShown) { _, up in
             if up { composing = false }
         }
-        // A tapped reply notice with the chat already up: the session it named is opened
-        // here, rather than waiting for the next launch to read it — the shape a tapped
-        // reminder takes just below.
-        .onChange(of: model.pendingSession) { _, id in
-            guard id != nil else { return }
-            Task { _ = await model.openPendingSession() }
-        }
-        // A tapped reminder opens the Routines page in the same shell as the chat.
-        .onChange(of: model.pendingRoutine) { _, id in
-            if id != nil {
-                tasksSelected = false
-                tasks = false
-                analytics = false
-                crew = false
-                routinesSelected = true
-                routines = true
-            }
-        }
-        .onAppear {
-            if model.pendingRoutine != nil {
-                tasksSelected = false
-                tasks = false
-                analytics = false
-                crew = false
-                routinesSelected = true
-                routines = true
+        .onChange(of: isActiveTab) { _, active in
+            if !active, drawer {
+                drawer = false
             }
         }
         // The model draws a reply's unread mark from this: the chat counts as being read
         // only while it is the screen in front.
-        .onChange(of: threadOnScreen) { _, visible in model.threadOnScreen = visible }
-        .onAppear { model.threadOnScreen = threadOnScreen }
+        .onChange(of: threadOnScreen) { _, visible in model.setThreadOnScreen(visible) }
+        .onAppear { model.setThreadOnScreen(threadOnScreen) }
         .sessionRename($renaming)
         // Where the files come from: the attachment sheet and the system choosers it opens,
         // shared with a project's own page through `ComposerAttach`.
@@ -548,20 +499,11 @@ struct ChatView: View {
     /// than written into the shell's body, which is a stack of layers as it is.
     private var sessionsLayer: some View {
         SessionsDrawer(
-            routinesSelected: routinesSelected,
-            tasksSelected: tasksSelected,
-            analyticsSelected: analytics,
-            crewSelected: crew,
             revealed: drawer,
             swiping: touching && held == true,
             onClose: closeDrawer,
             onNewSession: startSessionFromDrawer,
-            onNewFolderSession: startFolderSession,
             onSettings: openSettingsFromDrawer,
-            onRoutines: openRoutines,
-            onTasks: openTasks,
-            onAnalytics: openAnalytics,
-            onCrew: openCrew,
             onTraces: { session in
                 tracesTarget = SessionTracesTarget(id: session.id, title: session.label)
             }
@@ -574,39 +516,6 @@ struct ChatView: View {
         .accessibilityFocused($accessibleSurface, equals: .sessions)
         .accessibilityAddTraits(.isModal)
         .accessibilityHidden(UIAccessibility.isVoiceOverRunning && !drawer)
-    }
-
-    @ViewBuilder
-    private var cardContent: some View {
-        if routines {
-            // The sessions are the chat's own drawer, and this screen opens it the
-            // way the chat does: the same control, the same gesture. Dismissing the
-            // drawer without choosing a session leaves the person on the routines —
-            // only a session chosen takes the card back to the chat.
-            RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
-                .equatable()
-        } else if analytics {
-            AnalyticsView(account: account, pushed: $analyticsPage, onSessions: openDrawer)
-                .equatable()
-        } else if crew {
-            CrewView(
-                account: account,
-                pushed: $crewPage,
-                claimed: held == true || drawer,
-                onSessions: openDrawer,
-                onChatWithBot: { botId in
-                    crew = false
-                    crewPage = false
-                    Task { await model.startBotSession(botId: botId) }
-                }
-            )
-            .equatable()
-        } else if tasks {
-            TaskListsView(pushed: $taskPage, onSessions: openDrawer)
-                .equatable()
-        } else {
-            chat
-        }
     }
 
     /// The panel's tabs and the one in front, when the daemon has any and the sessions are not
@@ -636,7 +545,7 @@ struct ChatView: View {
     /// Whether the thread is what the person is looking at: the chat's card is the one
     /// showing and the sessions are not over it. A reply that lands while this is false is
     /// unread — leaving the chat before the answer is what that means.
-    private var threadOnScreen: Bool { !routines && !tasks && !analytics && !crew && !settings && !drawer }
+    private var threadOnScreen: Bool { isActiveTab && !settingsOpen && !drawer }
 
     /// How wide the panel comes out: most of the screen, because it carries reading matter
     /// rather than a list — and never all of it, so the chat it slid over stays the thing the
@@ -710,7 +619,7 @@ struct ChatView: View {
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
         if drawer || panelShown { return true }
         guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
-        return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (analytics && analyticsPage) || (crew && crewPage)) : hasPanel
+        return across > 0 ? true : hasPanel
     }
 
     /// Where a drag that has just been let go leaves the card: past halfway, or flicked there,
@@ -741,21 +650,8 @@ struct ChatView: View {
         }
     }
 
-    /// Which of the three pages the drawer opens.
-    private enum Page { case routines, tasks, analytics, crew }
-
-    /// The drawer's actions, named rather than written inline: the drawer is a stack of
-    /// arguments as it is, and the shell's body was one expression the type checker could
-    /// not finish with them written whole.
-
     /// A session was chosen: the card goes back to the chat, which is where it is read.
     private func closeDrawer() {
-        routinesSelected = false
-        routines = false
-        tasksSelected = false
-        tasks = false
-        analytics = false
-        crew = false
         Task { @MainActor in
             drawer = false
         }
@@ -765,14 +661,6 @@ struct ChatView: View {
         // Inside the tap that asked for it, before the session moves: the cursor is in the
         // field the press just opened, so the next thing said is typed rather than looked
         // for. The browser's own new session takes focus the same way.
-        routinesSelected = false
-        routines = false
-        tasksSelected = false
-        tasks = false
-        analytics = false
-        crew = false
-        // The drawer leaves in the tap's own update, as the Work side's control does, so the
-        // card is already coming back when the field takes the cursor.
         drawer = false
         composing = true
         starting = true
@@ -783,52 +671,9 @@ struct ChatView: View {
         }
     }
 
-    private func startFolderSession(_ project: String, _ backend: String) {
-        routines = false
-        routinesSelected = false
-        tasks = false
-        analytics = false
-        crew = false
-        tasksSelected = false
-        drawer = false
-        starting = true
-        Task {
-            if await model.startWorkSession(project: project, backend: backend, confirmed: true) { composing = true }
-            starting = false
-        }
-    }
-
     private func openSettingsFromDrawer() {
         drawer = false
-        routinesSelected = false
-        routines = false
-        tasksSelected = false
-        tasks = false
-        analytics = false
-        crew = false
-        settings = true
-    }
-
-    private func openRoutines() { openPage(.routines) }
-    private func openTasks() { openPage(.tasks) }
-    private func openAnalytics() { openPage(.analytics) }
-    private func openCrew() { openPage(.crew) }
-    /// Coming out of the drawer onto a page: the page takes its place on the card first while
-    /// `drawer` is still up (`rest` unchanged, so no animation transaction runs on the swap),
-    /// and the next turn closes `drawer` so `.animation(reduceMotion ? nil : Self.lidMove, value: rest)` slides the
-    /// already-swapped card across the screen.
-    private func openPage(_ page: Page) {
-        closeMenu()
-        model.panelOpen = false
-        routinesSelected = page == .routines
-        routines = page == .routines
-        tasksSelected = page == .tasks
-        tasks = page == .tasks
-        analytics = page == .analytics
-        crew = page == .crew
-        Task { @MainActor in
-            drawer = false
-        }
+        onOpenSettings()
     }
 
     /// Opening the sessions is leaving the thread: the keys go down with it rather
@@ -938,18 +783,18 @@ struct ChatView: View {
             book.bare = 0
             sent = nil
             book.sentTop = nil
-            book.placed = true
+            placed = true
             if room != 1 { room = 1 }
-            book.following = true
+            following = true
             return
         }
         sent = id
         book.sentTop = nil
-        book.placed = false
+        placed = false
         // A send is the thread's own end — the room below the words is opened for the
         // reply, and the reply is followed from there, whatever the person was doing
         // before the send.
-        book.following = true
+        following = true
     }
 
     /// What a running turn's panel says when raised from the send control.
@@ -997,7 +842,7 @@ struct ChatView: View {
                             )
                             .frame(
                                 minHeight: welcomeHeight,
-                                alignment: composing ? .bottom : .center
+                                alignment: .center
                             )
                             .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.14), value: composing)
                             .transition(.opacity)
@@ -1090,6 +935,10 @@ struct ChatView: View {
             // `following`. Keeping the anchor fixed at `.top` avoids flipping the scroll view's
             // alignment mid-send when the first message arrives.
             .defaultScrollAnchor(.top)
+            // Once the reply fills the room below a send, let the scroll view hold its
+            // own bottom edge as content grows. A scrollTo from the size callback can
+            // change the lazy stack's measured size and trigger that same callback.
+            .defaultScrollAnchor(following && model.busy && placed && room <= 1 ? .bottom : .top, for: .sizeChanges)
             .defaultScrollAnchor(.top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             // Frozen the moment the card has claimed the drag: a sideways swipe that pulled the
@@ -1113,7 +962,7 @@ struct ChatView: View {
                 // to be carried to: the welcome sits against the composer on its own, and
                 // the empty moment a session passes through on its way to its replay arms
                 // nothing.
-                if atEnd, !book.moving, !model.messages.isEmpty { book.following = true }
+                if atEnd, !book.moving, !model.messages.isEmpty { following = true }
             }
             // A content size that changed is the box having laid out what it was handed: the
             // sizing is asked again, and a send whose room the box took is scrolled into the
@@ -1125,15 +974,6 @@ struct ChatView: View {
                 geometry.contentSize
             } action: { _, _ in
                 sizeRoom(proxy)
-                // A reply being written is carried along with the thread's end once it has
-                // filled the room opened for the send, so the newest line stays in view —
-                // while the person has left the thread at its end, and never fighting a
-                // thumb that took it away from there. `busy` rather than the last row's own
-                // flag: a steer puts the person's message after the answer being written,
-                // and the reply still grows where it began.
-                if book.following, model.busy, book.placed, room <= 1 {
-                    proxy.scrollTo(Self.threadEnd, anchor: .bottom)
-                }
             }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.containerSize.height
@@ -1149,7 +989,7 @@ struct ChatView: View {
                 // message is landing on. If the box grows further as the keyboard finishes
                 // clearing, the room grows with it without re-triggering the scroll animation
                 // on every frame.
-                guard (!composing && book.placed) || height > book.threadHeight else { return }
+                guard (!composing && placed) || height > book.threadHeight else { return }
                 book.threadHeight = height
                 sizeRoom(proxy)
             }
@@ -1167,11 +1007,11 @@ struct ChatView: View {
                 switch phase {
                 case .tracking, .interacting, .decelerating:
                     book.moving = true
-                    book.following = false
-                    book.placed = true
+                    following = false
+                    placed = true
                 case .idle:
                     book.moving = false
-                    book.following = atEnd
+                    following = atEnd
                 case .animating:
                     break
                 }
@@ -1216,12 +1056,12 @@ struct ChatView: View {
                 book.bare = 0
                 book.sentTop = nil
                 sent = nil
-                book.placed = true
+                placed = true
                 if room != 1 { room = 1 }
                 // A different thread: whether its reply is followed is left to the end this
                 // one opens at, read off the scroll as usual, rather than carried over from
                 // the thread left behind.
-                book.following = false
+                following = false
                 // Every resumed session opens at its newest content, including one opened
                 // from a reply notice. Wait for the handshake's replay before pointing the
                 // lazy stack at the end; an empty session's end is its welcome.
@@ -1280,7 +1120,7 @@ struct ChatView: View {
             // deceleration may have turned following off; let the tap take ownership
             // before the scroll starts, so incoming reply growth cannot pull against it.
             book.moving = false
-            book.following = true
+            following = true
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
         } label: {
             Image(systemName: "arrow.down")
@@ -1315,13 +1155,15 @@ struct ChatView: View {
             var still = Transaction()
             still.disablesAnimations = true
             withTransaction(still) { room = next }
-        } else if !book.placed {
-            book.placed = true
-            // The room under the words is already the height that puts them at the top, so the
-            // thread's end is where the send is taken — the same target the person was already
-            // being carried to, now that the room has been opened.
-            withAnimation(.smooth(duration: 0.35)) {
-                proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+        } else if !placed {
+            placed = true
+            // The room is measured. Place the send after SwiftUI leaves this layout pass.
+            let message = sent
+            Task { @MainActor in
+                guard sent == message, following, !book.moving else { return }
+                withAnimation(.smooth(duration: 0.35)) {
+                    proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+                }
             }
         }
     }
@@ -1494,57 +1336,6 @@ struct ChatView: View {
             .frame(width: 30, height: 30)
     }
 
-    /// What just happened, floated under the top bar and worn in the platform's own glass —
-    /// the material every control here is made of — so the line reads as part of the surface
-    /// rather than a bare sentence on the page. It is as wide as its own words need and no
-    /// wider: a two-word confirmation is a small bubble, and a long line grows the bubble with
-    /// it, held between the thread's own margins.
-    @ViewBuilder private var noteToast: some View {
-        if let note = model.note {
-            // The two spacers are what make the bubble take only its own width — a short line a
-            // small bubble, a long one wrapping against the margin — and hold it centred, the
-            // same shape the person's own message is given.
-            HStack(spacing: 0) {
-                Spacer(minLength: MiloTheme.margin)
-                HStack(alignment: .top, spacing: MiloTheme.Space.three) {
-                    Image(systemName: note.failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                        .font(MiloTheme.Text.body)
-                        .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.success)
-                    Text(note.text)
-                        .font(MiloTheme.Text.body)
-                        .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.foreground)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button {
-                        model.dismissNote()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(MiloTheme.muted)
-                            .frame(width: 26, height: 26)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Dismiss")
-                }
-                .padding(.horizontal, MiloTheme.Space.four)
-                .padding(.vertical, MiloTheme.Space.three)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
-                Spacer(minLength: MiloTheme.margin)
-            }
-            .padding(.top, topbarHeight + MiloTheme.Space.two)
-            .transition(.opacity)
-            // A notice is not a thing to keep: it says what just happened and then gets out of
-            // the way, an error holding longer because it is the one worth reading. The same
-            // life the browser's own notice keeps.
-            .task(id: note) {
-                do { try await Task.sleep(for: .seconds(note.failed ? 9 : 5)) }
-                catch { return }
-                guard model.note == note else { return }
-                model.dismissNote()
-            }
-        }
-    }
-
     private func bottom(_ proxy: ScrollViewProxy) -> some View {
         VStack(spacing: MiloTheme.Space.two) {
             if let pending = model.pending {
@@ -1606,20 +1397,20 @@ struct WelcomeView: View {
     private var showHero: Bool {
         guard !typing else { return false }
         if model.sessionBot != nil { return true }
-        if keyboardUp, availableHeight > 0, availableHeight < 120 { return false }
+        if keyboardUp, availableHeight > 0, availableHeight < 135 { return false }
         return true
     }
 
     var body: some View {
         let contentTransition: AnyTransition = reduceMotion
             ? .opacity
-            : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
+            : .opacity.combined(with: .scale(scale: 0.96, anchor: .center))
         let stripTransition: AnyTransition = reduceMotion
             ? .opacity
-            : .opacity.combined(with: .offset(y: 10))
+            : .opacity.combined(with: .offset(y: 8))
 
         return VStack(spacing: 0) {
-            Spacer(minLength: keyboardUp && model.sessionBot == nil ? 0 : MiloTheme.Space.three)
+            Spacer(minLength: keyboardUp && model.sessionBot == nil ? MiloTheme.Space.two : MiloTheme.Space.three)
 
             if !typing {
                 if showHero {
@@ -1627,8 +1418,12 @@ struct WelcomeView: View {
                         .transition(contentTransition)
 
                     if model.sessionBot == nil {
-                        Spacer()
-                            .frame(height: keyboardUp ? MiloTheme.Space.four : MiloTheme.Space.five)
+                        if keyboardUp {
+                            Spacer(minLength: MiloTheme.Space.three)
+                        } else {
+                            Spacer()
+                                .frame(height: MiloTheme.Space.five)
+                        }
                     }
                 }
 
@@ -1638,15 +1433,18 @@ struct WelcomeView: View {
                             keyboardStrip
                                 .transition(stripTransition)
                         } else {
-                            VStack(spacing: MiloTheme.Space.two + 2) {
-                                ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                                    let isResume = isResumeSuggestion(suggestion)
-                                    let hasMore = index < model.suggestions.count - 1
-                                    card(suggestion, isResume: isResume)
-                                        .padding(.bottom, isResume && hasMore ? MiloTheme.Space.one : 0)
+                            let starters = model.suggestions.filter { !isResumeSuggestion($0) }
+                            if !starters.isEmpty {
+                                CenteredFlowLayout(
+                                    horizontalSpacing: MiloTheme.Space.two,
+                                    verticalSpacing: MiloTheme.Space.two
+                                ) {
+                                    ForEach(starters) { suggestion in
+                                        pill(suggestion, isResume: false, compact: false)
+                                    }
                                 }
+                                .transition(contentTransition)
                             }
-                            .transition(contentTransition)
                         }
                     }
                     .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.14), value: keyboardUp)
@@ -1657,7 +1455,15 @@ struct WelcomeView: View {
 
             if !keyboardUp || model.sessionBot != nil {
                 Spacer(minLength: MiloTheme.Space.four)
-                Spacer(minLength: 0)
+                if !keyboardUp,
+                   model.sessionBot == nil,
+                   !typing,
+                   let resume = model.suggestions.first(where: isResumeSuggestion) {
+                    resumeRow(resume)
+                        .transition(stripTransition)
+                } else {
+                    Spacer(minLength: 0)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -1671,25 +1477,27 @@ struct WelcomeView: View {
         if let bot = model.sessionBot {
             let avatar = CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name)
             let haloTone = Color.hex(MiloPaletteId.resolve(avatar.palette).preset.logoTop)
-            VStack(alignment: .center, spacing: MiloTheme.Space.three) {
+            VStack(alignment: .center, spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
                 ZStack {
                     Circle()
-                        .fill(haloTone.opacity(0.24))
+                        .fill(haloTone.opacity(keyboardUp ? 0.16 : 0.24))
                         .frame(width: keyboardUp ? 64 : 114, height: keyboardUp ? 64 : 114)
-                        .blur(radius: keyboardUp ? 12 : 20)
-                    Circle()
-                        .fill(haloTone.opacity(0.14))
-                        .frame(width: keyboardUp ? 56 : 100, height: keyboardUp ? 56 : 100)
+                        .blur(radius: keyboardUp ? 14 : 20)
+                    if !keyboardUp {
+                        Circle()
+                            .fill(haloTone.opacity(0.14))
+                            .frame(width: 100, height: 100)
+                    }
                     CrewBotAvatar(
                         avatar: avatar,
-                        size: keyboardUp ? 44 : 78,
+                        size: keyboardUp ? 48 : 78,
                         animated: true
                     )
                 }
 
                 VStack(alignment: .center, spacing: MiloTheme.Space.one) {
                     Text(bot.name)
-                        .font(MiloTheme.Text.title)
+                        .font(keyboardUp ? MiloTheme.Text.body.weight(.semibold) : MiloTheme.Text.title)
                         .foregroundStyle(MiloTheme.foreground)
                         .multilineTextAlignment(.center)
 
@@ -1707,37 +1515,32 @@ struct WelcomeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         } else {
-            let layout = keyboardUp
-                ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
-                : AnyLayout(VStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
-
-            layout {
+            VStack(alignment: .center, spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
                 ZStack {
                     Circle()
-                        .fill(MiloTheme.accent.opacity(0.18))
-                        .frame(width: keyboardUp ? 44 : 72, height: keyboardUp ? 44 : 72)
-                        .blur(radius: keyboardUp ? 10 : 16)
-                    MiloMark(size: keyboardUp ? 20 : 34)
-                        .frame(width: keyboardUp ? 36 : 60, height: keyboardUp ? 36 : 60)
-                        .glassEffect(.regular, in: Circle())
+                        .fill(MiloTheme.accent.opacity(keyboardUp ? 0.14 : 0.16))
+                        .frame(width: keyboardUp ? 48 : 74, height: keyboardUp ? 48 : 74)
+                        .blur(radius: keyboardUp ? 12 : 20)
+                    MiloMark(size: keyboardUp ? 26 : 42)
+                        .frame(width: keyboardUp ? 34 : 52, height: keyboardUp ? 34 : 52)
                 }
 
-                VStack(alignment: keyboardUp ? .leading : .center, spacing: MiloTheme.Space.one) {
+                VStack(alignment: .center, spacing: MiloTheme.Space.one) {
                     Text("What's on your mind?")
-                        .font(MiloTheme.Text.title)
-                        .foregroundStyle(MiloTheme.foreground)
-                        .multilineTextAlignment(keyboardUp ? .leading : .center)
+                        .font(keyboardUp ? MiloTheme.Text.body.weight(.medium) : MiloTheme.Text.title)
+                        .foregroundStyle(keyboardUp ? MiloTheme.foreground2 : MiloTheme.foreground)
+                        .multilineTextAlignment(.center)
 
                     if !keyboardUp {
                         Text("Let's make something of it.")
                             .font(MiloTheme.Text.base)
-                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .foregroundStyle(MiloTheme.muted)
                             .multilineTextAlignment(.center)
                             .transition(.opacity)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
@@ -1750,7 +1553,7 @@ struct WelcomeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: MiloTheme.Space.two) {
                 ForEach(model.suggestions) { suggestion in
-                    pill(suggestion, isResume: isResumeSuggestion(suggestion))
+                    pill(suggestion, isResume: isResumeSuggestion(suggestion), compact: true)
                 }
             }
         }
@@ -1761,26 +1564,26 @@ struct WelcomeView: View {
         .marksSidewaysDrag()
     }
 
-    private func pill(_ suggestion: Suggestion, isResume: Bool) -> some View {
+    private func pill(_ suggestion: Suggestion, isResume: Bool, compact: Bool) -> some View {
         Button {
             press(suggestion)
         } label: {
-            HStack(spacing: MiloTheme.Space.two) {
+            HStack(spacing: MiloTheme.Space.one + 2) {
                 Image(systemName: suggestion.symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
+                    .font(.system(size: compact ? 12 : 13, weight: .medium))
+                    .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.mutedStrong)
 
                 Text(suggestion.title)
-                    .font(MiloTheme.Text.small.weight(.medium))
-                    .foregroundStyle(MiloTheme.foreground)
+                    .font(MiloTheme.Text.small.weight(isResume ? .medium : (compact ? .regular : .medium)))
+                    .foregroundStyle(compact ? MiloTheme.foreground2 : MiloTheme.foreground)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 210, alignment: .leading)
+                    .frame(maxWidth: compact ? 200 : nil, alignment: .leading)
             }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .frame(height: 36)
-            .glassEffect(
-                (isResume ? Glass.regular.tint(MiloTheme.accent.opacity(0.12)) : .regular).interactive(),
+            .padding(.horizontal, compact ? MiloTheme.Space.three : MiloTheme.Space.three + 2)
+            .frame(height: compact ? 32 : 36)
+            .background(
+                isResume ? MiloTheme.accent.opacity(0.11) : MiloTheme.surface.opacity(0.72),
                 in: Capsule()
             )
             .contentShape(Capsule())
@@ -1788,50 +1591,43 @@ struct WelcomeView: View {
         .buttonStyle(PressableStyle())
     }
 
-    private func card(_ suggestion: Suggestion, isResume: Bool) -> some View {
+    private func resumeRow(_ suggestion: Suggestion) -> some View {
         Button {
             press(suggestion)
         } label: {
             HStack(alignment: .center, spacing: MiloTheme.Space.three) {
                 Image(systemName: suggestion.symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
-                    .frame(width: isResume ? 34 : 30, height: isResume ? 34 : 30)
-                    .background(
-                        isResume ? MiloTheme.accent.opacity(0.16) : MiloTheme.surfaceWarm,
-                        in: Circle()
-                    )
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MiloTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(MiloTheme.accent.opacity(0.14), in: Circle())
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(suggestion.title)
-                        .font(MiloTheme.Text.base.weight(.semibold))
+                        .font(MiloTheme.Text.small.weight(.semibold))
                         .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(isResume ? 2 : 1)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
                         .truncationMode(.tail)
 
-                    if isResume {
-                        Text(suggestion.detail)
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.mutedStrong)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text(suggestion.detail)
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(1)
                 }
 
-                if isResume {
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(MiloTheme.mutedStrong)
-                }
+                Spacer(minLength: MiloTheme.Space.two)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MiloTheme.muted)
             }
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, isResume ? MiloTheme.Space.three : MiloTheme.Space.two + 2)
+            .padding(.vertical, MiloTheme.Space.two + 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .miloGlassCard(tint: isResume ? MiloTheme.accent.opacity(0.12) : nil, interactive: true)
+            .background(
+                MiloTheme.accent.opacity(0.09),
+                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+            )
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         }
         .buttonStyle(PressableStyle())
@@ -1845,5 +1641,73 @@ struct WelcomeView: View {
         case .send(let prompt): withAnimation(SettlesIn.motion) { model.send(prompt) }
         case .resume(let id): Task { await model.resume(id) }
         }
+    }
+}
+
+/// Centers suggestion capsules cleanly across wrapped rows without fixed column widths.
+private struct CenteredFlowLayout: Layout {
+    var horizontalSpacing: CGFloat
+    var verticalSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = computeRows(maxWidth: maxWidth, subviews: subviews)
+        let height = rows.enumerated().reduce(CGFloat(0)) { total, item in
+            let rowHeight = item.element.map(\.size.height).max() ?? 0
+            return total + rowHeight + (item.offset > 0 ? verticalSpacing : 0)
+        }
+        let width = proposal.width ?? (rows.map { rowWidth($0) }.max() ?? 0)
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(maxWidth: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            let rowHeight = row.map(\.size.height).max() ?? 0
+            var x = bounds.midX - rowWidth(row) / 2
+            for item in row {
+                item.subview.place(
+                    at: CGPoint(x: x, y: y + (rowHeight - item.size.height) / 2),
+                    proposal: ProposedViewSize(item.size)
+                )
+                x += item.size.width + horizontalSpacing
+            }
+            y += rowHeight + verticalSpacing
+        }
+    }
+
+    private struct Placed {
+        let subview: LayoutSubview
+        let size: CGSize
+    }
+
+    private func rowWidth(_ row: [Placed]) -> CGFloat {
+        guard !row.isEmpty else { return 0 }
+        return row.reduce(0) { $0 + $1.size.width } + horizontalSpacing * CGFloat(row.count - 1)
+    }
+
+    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [[Placed]] {
+        var rows: [[Placed]] = []
+        var current: [Placed] = []
+        var usedWidth: CGFloat = 0
+
+        for subview in subviews {
+            var size = subview.sizeThatFits(ProposedViewSize(width: maxWidth.isFinite ? maxWidth : nil, height: nil))
+            if maxWidth.isFinite, size.width > maxWidth {
+                size.width = maxWidth
+            }
+            let needed = current.isEmpty ? size.width : usedWidth + horizontalSpacing + size.width
+            if !current.isEmpty, needed > maxWidth {
+                rows.append(current)
+                current = [Placed(subview: subview, size: size)]
+                usedWidth = size.width
+            } else {
+                current.append(Placed(subview: subview, size: size))
+                usedWidth = needed
+            }
+        }
+        if !current.isEmpty { rows.append(current) }
+        return rows
     }
 }

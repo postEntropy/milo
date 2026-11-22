@@ -453,22 +453,19 @@ private struct IdentifiableBotId: Identifiable {
     let id: String
 }
 
-struct CrewView: View, Equatable {
+struct CrewView: View {
     let account: Account
-    @Binding var pushed: Bool
-    var claimed: Bool = false
-    let onSessions: () -> Void
+    var externalPath: Binding<NavigationPath>? = nil
     var onChatWithBot: (String) -> Void = { _ in }
-    nonisolated static func == (lhs: CrewView, rhs: CrewView) -> Bool {
-        lhs.account == rhs.account && lhs.claimed == rhs.claimed
-    }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppModel.self) private var model
     @State private var bots: [CrewBot] = []
     @State private var work: [DelegatedWork] = []
-    @State private var path: [CrewPage] = []
+    @State private var localPath = NavigationPath()
+    @State private var activeBotPageId: String?
     @State private var error: String?
     @State private var refreshError: String?
+    @State private var refreshErrorIsConnection = false
     @State private var loading = true
     @State private var busy = false
     @State private var refreshGeneration = 0
@@ -503,73 +500,33 @@ struct CrewView: View, Equatable {
         }
     }
 
+    private func pushPage(_ page: CrewPage) {
+        if let externalPath {
+            externalPath.wrappedValue.append(page)
+        } else {
+            localPath.append(page)
+        }
+    }
+
     var body: some View {
-        NavigationStack(path: $path) {
-            CrewHome(
-                bots: sortedBots,
-                work: work,
-                loading: loading,
-                error: error ?? refreshError,
-                onDismissError: { error = nil; refreshError = nil },
-                onSessions: onSessions,
-                onNewBot: {
-                    error = nil
-                    newBotName = ""
-                    newBotHandle = ""
-                    newBotInstructions = ""
-                    newBotAvatar = .shuffled()
-                    creatingBot = true
-                },
-                onRefresh: { await refresh() },
-                botCard: { bot in
-                    botCard(bot) {
-                        guard !claimed else { return }
-                        guidanceDraft = ""
-                        expandedMissions = []
-                        path.append(.bot(bot.id))
-                    }
-                },
-                workRow: { item in
-                    workRow(item) {
-                        guard !claimed else { return }
-                        objectiveDraft = item.objective
-                        scheduleMode = item.schedule?.kind == "at" && item.schedule?.restricted == true ? "existing" : item.schedule?.kind ?? "once"
-                        if item.schedule?.kind == "every" {
-                            scheduleDraft = item.scheduleLabel?.replacingOccurrences(of: "every ", with: "") ?? ""
-                        } else {
-                            scheduleDraft = item.schedule?.time ?? ""
-                        }
-                        editingWork = false
-                        path.append(.work(item.id))
-                    }
-                }
-            )
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: CrewPage.self) { page in
-                switch page {
-                case .bot(let id):
-                    if let bot = bots.first(where: { $0.id == id }) {
-                        botDetailPage(bot)
-                    } else {
-                        missingPage("Bot not found.")
-                    }
-                case .work(let id):
-                    if let item = work.first(where: { $0.id == id }) {
-                        workDetailPage(item)
-                    } else {
-                        missingPage("Work not found.")
-                    }
+        Group {
+            if externalPath != nil {
+                crewContent
+            } else {
+                NavigationStack(path: $localPath) {
+                    crewContent
                 }
             }
         }
-        .onChange(of: path) { _, next in pushed = !next.isEmpty }
-        .onAppear { pushed = !path.isEmpty }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 await refresh()
                 do { try await Task.sleep(for: .seconds(3)) } catch { break }
             }
+        }
+        .onChange(of: model.onlineEpoch) { _, _ in
+            Task { await refresh() }
         }
         .alert("Rename bot", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $renameDraft)
@@ -624,7 +581,7 @@ struct CrewView: View, Equatable {
                 Task {
                     if let created = await createBot() {
                         creatingBot = false
-                        path.append(.bot(created.id))
+                        pushPage(.bot(created.id))
                     }
                 }
             }
@@ -649,6 +606,74 @@ struct CrewView: View, Equatable {
                         editingProfileBot = nil
                     }
                 }
+            }
+        }
+    }
+
+    private var crewContent: some View {
+        let visibleRefreshError = (refreshErrorIsConnection && model.connectionLine != nil) ? nil : refreshError
+        return CrewHome(
+            bots: sortedBots,
+            work: work,
+            loading: loading,
+            error: error ?? visibleRefreshError,
+            onDismissError: { error = nil; refreshError = nil; refreshErrorIsConnection = false },
+            onNewBot: {
+                error = nil
+                newBotName = ""
+                newBotHandle = ""
+                newBotInstructions = ""
+                newBotAvatar = .shuffled()
+                creatingBot = true
+            },
+            onRefresh: { await refresh() },
+            botCard: { bot in
+                botCard(bot) {
+                    guidanceDraft = ""
+                    expandedMissions = []
+                    pushPage(.bot(bot.id))
+                }
+            },
+            workRow: { item in
+                workRow(item) {
+                    objectiveDraft = item.objective
+                    scheduleMode = item.schedule?.kind == "at" && item.schedule?.restricted == true ? "existing" : item.schedule?.kind ?? "once"
+                    if item.schedule?.kind == "every" {
+                        scheduleDraft = item.scheduleLabel?.replacingOccurrences(of: "every ", with: "") ?? ""
+                    } else {
+                        scheduleDraft = item.schedule?.time ?? ""
+                    }
+                    editingWork = false
+                    pushPage(.work(item.id))
+                }
+            }
+        )
+        .toolbar(externalPath != nil ? .visible : .hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: CrewPage.self) { page in
+            switch page {
+            case .bot(let id):
+                Group {
+                    if let bot = bots.first(where: { $0.id == id }) {
+                        botDetailPage(bot)
+                    } else {
+                        missingPage("Bot not found.")
+                    }
+                }
+                .toolbarVisibility(.hidden, for: .tabBar)
+                .onAppear { activeBotPageId = id }
+                .onDisappear {
+                    if activeBotPageId == id { activeBotPageId = nil }
+                }
+            case .work(let id):
+                Group {
+                    if let item = work.first(where: { $0.id == id }) {
+                        workDetailPage(item)
+                    } else {
+                        missingPage("Work not found.")
+                    }
+                }
+                .toolbarVisibility(.hidden, for: .tabBar)
             }
         }
     }
@@ -794,9 +819,10 @@ struct CrewView: View, Equatable {
         let preset = MiloPaletteId.resolve(avatar.palette).preset
         let haloTone = Color.hex(preset.logoTop)
 
+        let visibleRefreshError = (refreshErrorIsConnection && model.connectionLine != nil) ? nil : refreshError
         return ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                if let message = error ?? refreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil } } }
+                if let message = error ?? visibleRefreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil; refreshErrorIsConnection = false } } }
 
                 // Character Profile Stage Card
                 VStack(spacing: MiloTheme.Space.four) {
@@ -1135,9 +1161,10 @@ struct CrewView: View, Equatable {
         let tone = statusTone(item.state)
         let canEdit = !["running", "completed", "cancelled"].contains(item.state)
 
+        let visibleRefreshError = (refreshErrorIsConnection && model.connectionLine != nil) ? nil : refreshError
         return ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                if let message = error ?? refreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil } } }
+                if let message = error ?? visibleRefreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil; refreshErrorIsConnection = false } } }
 
                 VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
                     HStack {
@@ -1388,7 +1415,7 @@ struct CrewView: View, Equatable {
                             Button {
                                 guidanceDraft = ""
                                 expandedMissions = []
-                                path.append(.bot(bot.id))
+                                pushPage(.bot(bot.id))
                             } label: {
                                 HStack(spacing: MiloTheme.Space.two) {
                                     CrewBotAvatar(avatar: bot.resolvedAvatar, state: bot.currentState, size: 30)
@@ -1529,8 +1556,19 @@ struct CrewView: View, Equatable {
             bots = fetchedBots
             work = fetchedWork
             refreshError = nil
+            refreshErrorIsConnection = false
+        } catch is CancellationError {
+            return
         } catch {
-            if mine == refreshGeneration { self.refreshError = error.localizedDescription }
+            if mine == refreshGeneration {
+                if model.consumeConnectionError(error) {
+                    self.refreshError = nil
+                    self.refreshErrorIsConnection = false
+                } else {
+                    self.refreshErrorIsConnection = AppModel.isConnectionError(error)
+                    self.refreshError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                }
+            }
         }
         loading = false
     }
@@ -1631,7 +1669,14 @@ struct CrewView: View, Equatable {
             _ = try await MiloApi.call("crew-remove", ["id": id], account: account, as: MiloApi.Ack.self)
             refreshGeneration += 1
             bots.removeAll { $0.id == id }
-            path.removeAll { $0 == .bot(id) }
+            if activeBotPageId == id {
+                activeBotPageId = nil
+                if let externalPath, !externalPath.wrappedValue.isEmpty {
+                    externalPath.wrappedValue.removeLast()
+                } else if !localPath.isEmpty {
+                    localPath.removeLast()
+                }
+            }
             error = nil
         } catch { self.error = error.localizedDescription }
     }
@@ -2136,7 +2181,6 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
     let loading: Bool
     let error: String?
     let onDismissError: () -> Void
-    let onSessions: () -> Void
     let onNewBot: () -> Void
     let onRefresh: () async -> Void
     @ViewBuilder let botCard: (CrewBot) -> BotCardView
@@ -2261,17 +2305,12 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
         }
         .miloWallpaperBackground()
         .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: MiloTheme.Space.one) {
-                HStack(spacing: 0) {
-                    SessionsButton(action: onSessions)
-                    Spacer(minLength: 0)
-                }
-                .frame(minHeight: 46)
+            if model.connectionLine != nil {
                 ConnectionPill()
+                    .padding(.horizontal, MiloTheme.margin)
+                    .padding(.bottom, MiloTheme.Space.two)
+                    .animation(.smooth(duration: 0.22), value: model.connectionLine)
             }
-            .padding(.horizontal, MiloTheme.margin)
-            .padding(.bottom, MiloTheme.Space.two)
-            .animation(.smooth(duration: 0.22), value: model.connectionLine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             MiloCornerActionButton(title: "New bot", action: onNewBot)

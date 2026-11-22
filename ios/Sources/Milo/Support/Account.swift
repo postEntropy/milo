@@ -77,6 +77,21 @@ enum AccountStore {
     /// so a paired phone keeps the chat it opens on rather than starting a new one.
     private static let legacyChatKey = "milo.conversation"
     private static let tokenKey = "milo.token"
+    private static let lastSessionKey = "milo.lastSession"
+
+    static var lastSessionId: String? {
+        get {
+            let value = UserDefaults.standard.string(forKey: lastSessionKey)
+            return value?.isEmpty == false ? value : nil
+        }
+        set {
+            if let newValue, !newValue.isEmpty {
+                UserDefaults.standard.set(newValue, forKey: lastSessionKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: lastSessionKey)
+            }
+        }
+    }
     /// The chat survives unpairing: pairing again should reopen the same session
     /// rather than start a second one beside it.
     static var chatId: String {
@@ -126,6 +141,7 @@ enum AccountStore {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: hostKey)
         defaults.removeObject(forKey: portKey)
+        defaults.removeObject(forKey: lastSessionKey)
     }
 }
 

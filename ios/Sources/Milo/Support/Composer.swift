@@ -767,6 +767,10 @@ struct PermissionBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            Text(ToolIcons.approvalTitle(pending.request.tool))
+                .font(MiloTheme.Text.small.weight(.semibold))
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Text(pending.request.summary)
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.foreground2)

@@ -6,46 +6,51 @@ import SwiftUI
  in. Everything lives in the daemon's store, so every action reads the whole set back
  rather than guessing at what it became.
  */
-struct TaskListsView: View, Equatable {
-    /// Whether one list's own page is open on top of the index, told to the shell: the
-    /// drawer's swipe belongs to the index, and over a page it keeps out of the way — the way
-    /// back from one is the platform's own, the edge swipe it answers and the control the stack
-    /// draws.
-    @Binding var pushed: Bool
-    /// Opening the sessions from here. The drawer belongs to the chat, and this screen
-    /// reaches it through the same control and the same swipe.
-    let onSessions: () -> Void
+struct TaskListsView: View {
+    var externalPath: Binding<NavigationPath>? = nil
 
-    nonisolated static func == (lhs: TaskListsView, rhs: TaskListsView) -> Bool {
-        true
-    }
     @Environment(AppModel.self) private var model
-    @State private var path: [String] = []
+    @State private var localPath = NavigationPath()
+
+    private enum Route: Hashable {
+        case detail(String)
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            TaskListIndex(
-                onSelect: { path.append($0) },
-                onSessions: onSessions
-            )
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: String.self) { listId in
-                TaskListDetail(
-                    listId: listId,
-                    onDeleted: { path.removeAll { $0 == listId } }
-                )
+        Group {
+            if externalPath != nil {
+                content
+            } else {
+                NavigationStack(path: $localPath) {
+                    content
+                }
             }
         }
-        // No drag of this screen's own over the stack: the way back from a page is the platform's
-        // own — the edge swipe the stack already answers, and the control it draws in the bar —
-        // rather than a second gesture that only mimics them from the middle of the screen.
-        .onChange(of: path) { _, next in pushed = !next.isEmpty }
         // A chat turn may have changed a list through Milo; re-read its persisted state.
         .onChange(of: model.answerEnded) { _, _ in
             Task { await model.refreshTaskLists() }
         }
-        .onAppear {
-            pushed = !path.isEmpty
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        TaskListIndex(
+            onSelect: { id in
+                if let externalPath {
+                    externalPath.wrappedValue.append(Route.detail(id))
+                } else {
+                    localPath.append(Route.detail(id))
+                }
+            }
+        )
+        .toolbar(externalPath != nil ? .visible : .hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: Route.self) { route in
+            switch route {
+            case .detail(let listId):
+                TaskListDetail(listId: listId)
+                    .toolbarVisibility(.hidden, for: .tabBar)
+            }
         }
     }
 }
@@ -54,7 +59,6 @@ struct TaskListsView: View, Equatable {
 
 private struct TaskListIndex: View {
     let onSelect: (String) -> Void
-    let onSessions: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var newName = ""
@@ -154,16 +158,12 @@ private struct TaskListIndex: View {
         .scrollDismissesKeyboard(.interactively)
         .miloWallpaperBackground()
         .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: MiloTheme.Space.one) {
-                HStack(spacing: 0) {
-                    SessionsButton(action: onSessions)
-                    Spacer(minLength: 0)
-                }
+            if model.connectionLine != nil {
                 ConnectionPill()
+                    .padding(.horizontal, MiloTheme.margin)
+                    .padding(.bottom, MiloTheme.Space.two)
+                    .animation(.smooth(duration: 0.22), value: model.connectionLine)
             }
-            .padding(.horizontal, MiloTheme.margin)
-            .padding(.bottom, MiloTheme.Space.two)
-            .animation(.smooth(duration: 0.22), value: model.connectionLine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             createBar
@@ -307,9 +307,9 @@ private struct TaskListRow: View {
 
 private struct TaskListDetail: View {
     let listId: String
-    let onDeleted: () -> Void
 
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var newTask = ""
     @State private var renaming = false
     @State private var renameDraft = ""
@@ -484,7 +484,7 @@ private struct TaskListDetail: View {
                 guard let list else { return }
                 Task {
                     if await model.deleteTaskList(name: list.name) {
-                        onDeleted()
+                        dismiss()
                     }
                 }
             }
