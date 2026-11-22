@@ -1,6 +1,5 @@
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { createInterface } from 'node:readline'
 import { tracesFile } from './config/paths.js'
 import type { TraceEvent } from './traces.js'
 
@@ -88,39 +87,40 @@ export interface SessionTraceReport {
 
 async function readEvents(detailId?: string): Promise<Array<{ id: string; event: AnalyticsEvent; full?: TraceEvent }>> {
   const entries: Array<{ id: string; event: AnalyticsEvent; full?: TraceEvent }> = []
-  const stream = createReadStream(tracesFile())
-  let lastByte: number | undefined
-  stream.on('data', (chunk: Buffer | string) => {
-    lastByte = typeof chunk === 'string' ? chunk.charCodeAt(chunk.length - 1) : chunk.at(-1)
-  })
-  const lines = createInterface({ input: stream, crlfDelay: Infinity })
+  const stream = createReadStream(tracesFile(), { encoding: 'utf8' })
   let index = 0
-  let invalidLine: number | undefined
-  try {
-    for await (const line of lines) {
-      index += 1
-      if (invalidLine !== undefined) throw new Error(`Execution log contains invalid JSON on line ${invalidLine}.`)
-      if (!line.trim()) continue
-      let event: TraceEvent
-      try {
-        event = JSON.parse(line) as TraceEvent
-      } catch {
-        invalidLine = index
-        continue
-      }
-      if (!event || typeof event.at !== 'string' || typeof event.event !== 'string' || typeof event.ok !== 'boolean' || typeof event.ms !== 'number') throw new Error(`Execution log contains an invalid event on line ${index}.`)
-      const id = typeof event.id === 'string' ? event.id : `legacy-${createHash('sha256').update(line).digest('hex')}`
-      entries.push({ id, event: summary(id, event), ...(id === detailId ? { full: event } : {}) })
+  let pending = ''
+  const readLine = (line: string, complete: boolean): void => {
+    index += 1
+    if (!line.trim()) return
+    let event: TraceEvent
+    try {
+      event = JSON.parse(line) as TraceEvent
+    } catch {
+      if (!complete) return // A crash can leave the last append incomplete.
+      throw new Error(`Execution log contains invalid JSON on line ${index}.`)
     }
+    if (!event || typeof event.at !== 'string' || typeof event.event !== 'string' || typeof event.ok !== 'boolean' || typeof event.ms !== 'number') throw new Error(`Execution log contains an invalid event on line ${index}.`)
+    const id = typeof event.id === 'string' ? event.id : `legacy-${createHash('sha256').update(line).digest('hex')}`
+    entries.push({ id, event: summary(id, event), ...(id === detailId ? { full: event } : {}) })
+  }
+  try {
+    for await (const chunk of stream) {
+      pending += chunk
+      let newline = pending.indexOf('\n')
+      while (newline !== -1) {
+        readLine(pending.slice(0, newline).replace(/\r$/, ''), true)
+        pending = pending.slice(newline + 1)
+        newline = pending.indexOf('\n')
+      }
+    }
+    if (pending) readLine(pending, false)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   } finally {
-    lines.close()
     stream.destroy()
   }
-  // A crash can leave the last append incomplete, without its terminating newline.
-  if (invalidLine !== undefined && lastByte === 10) throw new Error(`Execution log contains invalid JSON on line ${invalidLine}.`)
   return entries
 }
 

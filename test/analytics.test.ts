@@ -41,6 +41,14 @@ describe('analytics', () => {
     await expect(analyticsReport()).rejects.toThrow('invalid JSON')
   })
 
+  it('reads Unicode line separators inside recorded text', async () => {
+    const at = new Date().toISOString()
+    fileTraces.record({ id: 'unicode', at, event: 'tool.call', ok: true, ms: 1, output: `${'x'.repeat(65530)}\u2028next\u2029end` })
+    fileTraces.record({ id: 'after', at, event: 'turn', ok: true, ms: 2 })
+    expect((await analyticsReport()).total).toBe(2)
+    expect((await analyticsDetail('unicode')).event.output).toBe(`${'x'.repeat(65530)}\u2028next\u2029end`)
+  })
+
   it('groups session traces into chronological turn timelines', async () => {
     const t0 = Date.parse('2026-11-16T12:00:00.000Z')
     const iso = (offsetMs: number) => new Date(t0 + offsetMs).toISOString()
