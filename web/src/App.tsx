@@ -60,7 +60,15 @@ function readPendingMessages(): PendingMessage[] {
   } catch { return [] }
 }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
-type NewSessionContext = { project?: string; backend?: SessionBackendKind; firstMessage?: string; plan?: boolean; botId?: string }
+type NewSessionContext = {
+  project?: string
+  backend?: SessionBackendKind
+  firstMessage?: string
+  plan?: boolean
+  botId?: string
+  force?: boolean
+  onError?: (error: unknown) => void
+}
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -226,8 +234,8 @@ export default function App() {
   const followSend = useRef(false)
   /** Set when a session arrives, so opening one lands at its end, not its top. */
   const pinToEnd = useRef(false)
-  /** The words a fork-and-resend owes: sent once the new session is connected. */
-  const pendingSend = useRef<{ text: string; mentions?: MessageMentionRef[] } | null>(null)
+  /** The words a fork-and-resend or Settings help action owes: sent once the exact target session is connected. */
+  const pendingSend = useRef<{ sessionId: string; text: string; mentions?: MessageMentionRef[] } | null>(null)
   /** Set when an edit is being written: the next send redoes from that turn. */
   const editingTurn = useRef<number | null>(null)
   /** The live `send`, for the frame handler, which is defined before it. */
@@ -579,9 +587,9 @@ export default function App() {
   const redo = useCallback(async (text: string, upToTurn: number, mentions?: MessageMentionRef[]): Promise<boolean> => {
     if (!sessionId) return false
     const nextChatId = randomUUID()
-    pendingSend.current = { text, mentions }
     try {
       const res = await api<{ id: string }>('fork-session', { chatId: nextChatId, sessionId, upToTurn })
+      pendingSend.current = { sessionId: res.id, text, mentions }
       socket.close()
       setMessages([])
       setPanel(null)
@@ -590,7 +598,6 @@ export default function App() {
       setView('chat')
       return true
     } catch (error) {
-      pendingSend.current = null
       fail(error)
       return false
     }
@@ -672,9 +679,9 @@ export default function App() {
         opened.push({ id: frame.activeTurn.id, role: 'assistant', parts: [], at: frame.activeTurn.at, waitingSince: Date.now() })
       }
       setMessages(opened)
-      // A redo forks the session and owes the words: they go out now that the new
-      // session is the one this socket is speaking to.
-      if (pendingSend.current !== null) {
+      // Words owed to a forked or newly created session go out only once that exact
+      // session's socket is ready — never on a stale reconnect of the previous one.
+      if (pendingSend.current !== null && pendingSend.current.sessionId === frame.sessionId) {
         const owed = pendingSend.current
         pendingSend.current = null
         sendRef.current(owed.text, owed.mentions)
@@ -879,11 +886,7 @@ export default function App() {
   const newChat = useCallback(async (
     context: NewSessionContext = {},
   ): Promise<boolean> => {
-    editingTurn.current = null
     const nextChatId = randomUUID()
-    pendingSend.current = context.firstMessage ? { text: context.firstMessage } : null
-    composerRef.current?.focus()
-    setComposerFocus((current) => current + 1)
     try {
       const session = await api<{ id: string }>('new-session', {
         chatId: nextChatId,
@@ -892,6 +895,10 @@ export default function App() {
         ...(context.botId ? { botId: context.botId } : {}),
         ...(context.plan ? { plan: true } : {}),
       })
+      editingTurn.current = null
+      pendingSend.current = context.firstMessage
+        ? { sessionId: session.id, text: context.firstMessage }
+        : null
       const targetBot = context.botId ? crewBots.find((entry) => entry.id === context.botId) : undefined
       socket.close()
       activeBotMessageIds.current.clear()
@@ -902,13 +909,20 @@ export default function App() {
       setBackend({ kind: context.backend ?? 'milo' })
       setSessionBot(targetBot ? { id: targetBot.id, name: targetBot.name, handle: targetBot.handle, avatar: targetBot.avatar } : null)
       setSessionId(session.id)
-      setView('chat')
+      if (context.force) {
+        setSettingsDirty(false)
+        setViewRaw('chat')
+      } else {
+        setView('chat')
+      }
       setSidebarOpen(false)
       setChatId(nextChatId)
+      composerRef.current?.focus()
+      setComposerFocus((current) => current + 1)
       return true
     } catch (error) {
-      pendingSend.current = null
-      fail(error)
+      if (context.onError) context.onError(error)
+      else fail(error)
       return false
     }
   }, [socket, fail, setView, projects, crewBots])
@@ -1280,6 +1294,21 @@ export default function App() {
 
   const noteDirty = useCallback((dirty: boolean): void => { setSettingsDirty(dirty) }, [])
 
+  const startSessionFromSettings = useCallback(async (
+    firstMessage: string,
+  ): Promise<{ ok: true } | { ok: false; error?: string }> => {
+    if (view === 'settings' && settingsDirty && !window.confirm('Discard unsaved settings changes?')) {
+      return { ok: false }
+    }
+    let failure: string | undefined
+    const ok = await newChat({
+      firstMessage,
+      force: true,
+      onError: (err) => { failure = message(err) },
+    })
+    return ok ? { ok: true } : { ok: false, error: failure }
+  }, [view, settingsDirty, newChat])
+
   async function exportSession(id = sessionId, report: Report = setNotice): Promise<void> {
     if (!id) return
     try {
@@ -1464,7 +1493,7 @@ export default function App() {
       </header>
       <Suspense fallback={<div className="panel-state" role="status">Loading…</div>}>
       {view === 'settings'
-        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} onOpenSession={(id) => void openSession(id)} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
+        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} onOpenSession={(id) => void openSession(id)} onStartSession={startSessionFromSettings} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'analytics'
