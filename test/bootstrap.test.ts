@@ -55,6 +55,7 @@ const loadedConfig = (
       cdpUrl: null,
       keepSnapshots: 2,
     },
+    computer: { enabled: false },
     jobs: { max: 8 },
     sandbox: 'off',
     verification: { enabled: false, timeoutMs: 120_000 },

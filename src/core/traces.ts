@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
 import { tracesFile } from './config/paths.js'
+import { sanitizeToolArgsForPersistence } from './computer/sanitize.js'
+import { isComputerToolName } from './computer/tools.js'
 import type { ChatRequest, FinishReason, Provider, StreamEvent } from './providers/types.js'
 import { currentTraceContext } from './trace-context.js'
 
@@ -82,7 +84,7 @@ export class TracedProvider implements Provider {
     const { signal: _signal, trace: _trace, ...request } = req
     let input: unknown
     try {
-      input = JSON.parse(JSON.stringify(request)) as unknown
+      input = sanitizeRequestForTrace(request)
     } catch (error) {
       input = { error: `Could not capture request: ${errorMessage(error)}` }
       logWarn(`could not capture request for the execution log: ${errorMessage(error)}`)
@@ -101,7 +103,9 @@ export class TracedProvider implements Provider {
         const last = output.at(-1)
         if (event.type === 'text' && last?.type === 'text') last.delta += event.delta
         else if (event.type === 'reasoning' && last?.type === 'reasoning') last.delta += event.delta
-        else output.push({ ...event })
+        else if (event.type === 'tool-call' && isComputerToolName(event.name)) {
+          output.push({ ...event, args: sanitizeToolArgsForPersistence(event.name, event.args) })
+        } else output.push({ ...event })
         // The first token is the number that matters: it is the wait the person
         // feels, apart from the rest, which is the model producing the answer.
         if (firstTokenAt === undefined && (event.type === 'text' || event.type === 'reasoning' || event.type === 'tool-call')) {
@@ -155,13 +159,45 @@ export class TracedProvider implements Provider {
   }
 }
 
+/** Strip ephemeral desktop screenshots and raw accessibility trees before writing a trace line. */
+function sanitizeRequestForTrace(request: Omit<ChatRequest, 'signal' | 'trace'>): unknown {
+  const cloned = JSON.parse(JSON.stringify(request)) as Omit<ChatRequest, 'signal' | 'trace'>
+  if (Array.isArray(cloned.messages)) {
+    for (const message of cloned.messages) {
+      if (!Array.isArray(message.content)) continue
+      for (const part of message.content) {
+        if (part.type === 'tool-call' && isComputerToolName(part.name)) {
+          part.args = sanitizeToolArgsForPersistence(part.name, part.args)
+          continue
+        }
+        if (part.type !== 'tool-result') continue
+        if (typeof part.persistedContent === 'string') {
+          part.content = part.persistedContent
+          delete part.persistedContent
+          delete part.images
+        } else if (Array.isArray(part.images)) {
+          part.images = part.images.filter((image) => !image.inlineData && Boolean(image.path))
+          if (part.images.length === 0) delete part.images
+        }
+      }
+    }
+  }
+  return cloned
+}
+
 /** Keep the bytes that a request refers to even if its original files are later removed. */
 function traceAttachments(req: ChatRequest): Array<{ path: string; data?: string; error?: string }> {
   const paths = new Set<string>()
   for (const message of req.messages) {
     for (const part of message.content) {
       if (part.type === 'image' || part.type === 'document' || part.type === 'audio') paths.add(part.path)
-      else if (part.type === 'tool-result') for (const image of part.images ?? []) paths.add(image.path)
+      else if (part.type === 'tool-result') {
+        if (typeof part.persistedContent === 'string') continue
+        for (const image of part.images ?? []) {
+          if (image.inlineData || !image.path) continue
+          paths.add(image.path)
+        }
+      }
     }
   }
   return [...paths].map((file) => {

@@ -195,6 +195,7 @@ describe('a capability the registry can add is named in the prompt', () => {
   /** How each capability is named in "Your own setup". */
   const MARKER: Record<string, string> = {
     browser: 'Browser right now',
+    computer: 'Computer Use right now',
     google: 'Google (Gmail and Drive)',
     jobs: 'Background jobs right now',
     mcp: 'External tool servers (MCP)',
@@ -205,7 +206,7 @@ describe('a capability the registry can add is named in the prompt', () => {
   it('reads the capabilities the registry actually switches on', () => {
     // If this fails because registration was refactored, put the two back in sync:
     // a guard that reads nothing guards nothing.
-    expect(switchedOn).toEqual(['browser', 'google', 'jobs', 'mcp', 'search', 'skills'])
+    expect(switchedOn).toEqual(['browser', 'computer', 'google', 'jobs', 'mcp', 'search', 'skills'])
   })
 
   it('has a marker for every capability it reads', () => {
@@ -227,6 +228,22 @@ describe('a capability the registry can add is named in the prompt', () => {
       ],
       skills: [{ name: 'demo', description: 'x' }],
       browser: { binary: 'chromium', headless: true, profile: 'its own', running: false, port: null },
+      computer: {
+        enabled: true,
+        status: {
+          available: true,
+          platform: 'linux',
+          sdkVersion: '0.56.4',
+          displayServer: 'wayland+xwayland',
+          waylandEnabled: true,
+          atspiAvailable: true,
+          screenCaptureAvailable: true,
+          inputModes: { accessibility: true, windowScopedPointer: true, xsendEvent: true, hyprlandPlugin: false },
+          limitations: [],
+          summary: 'Ready',
+        },
+        boundWindow: null,
+      },
       google: { kind: 'connected', email: 'me@example.com', enabled: true, access: 'none' },
       mcp: { file: '/home/x/.milo/mcp.json', servers: [] },
       jobs: {

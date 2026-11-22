@@ -10,6 +10,7 @@ import {
 import path from 'node:path'
 import { fileChange } from '../change.js'
 import { patchTargets } from './apply-patch.js'
+import { isComputerToolName } from '../computer/tools.js'
 import { matchingRule, type RuleBook } from './rule-file.js'
 import { effectiveSegment, parseShell } from './shell-parse.js'
 import type { Tool } from './types.js'
@@ -257,9 +258,18 @@ export function barredByRules(args: unknown, cwd: string): boolean {
 export function approvalKey(tool: string, args: unknown, cwd: string): string | null {
   const record = args && typeof args === 'object' ? (args as Record<string, unknown>) : {}
 
-  // Each mail action needs its own confirmation; an earlier message or recipient
-  // is not an approval of a later one.
-  if (tool === 'gmail_send' || tool === 'gmail_draft' || tool === 'gmail_modify' || tool === 'mail_labels' || tool === 'delegated_work' || tool === 'crew') return null
+  // Each mail action and desktop operation needs its own confirmation; an earlier
+  // message, window, or click is never a blanket approval for a later one.
+  if (
+    tool === 'gmail_send' ||
+    tool === 'gmail_draft' ||
+    tool === 'gmail_modify' ||
+    tool === 'mail_labels' ||
+    tool === 'delegated_work' ||
+    tool === 'crew' ||
+    tool === 'computer_open' ||
+    tool === 'computer_act'
+  ) return null
 
   if (tool === 'shell_command') {
     const command = typeof record.command === 'string' ? record.command : ''
@@ -389,6 +399,8 @@ export function withDelegatedGrants(policy: PermissionPolicy, granted: string[],
     if (policy.explicitlyDenies?.(tool, args, directory)) return 'deny'
     // Sending needs an action-specific approval with the recipient and body visible.
     if (tool.name === 'gmail_send') return 'deny'
+    // Desktop access is never available in unattended delegated work.
+    if (isComputerToolName(tool.name)) return 'deny'
     const acts = actsOnSomething(tool, args)
     if (acts && (!granted.includes(tool.name) || barredByRules(args, directory))) return 'deny'
     const decision = await policy.decide(tool, args, options)
@@ -404,7 +416,8 @@ export function withDelegatedGrants(policy: PermissionPolicy, granted: string[],
  * to a turn that has promised not to make one.
  */
 export function isPlanTool(tool: Tool<unknown> | undefined): boolean {
-  return tool !== undefined && (tool.readOnly === true || tool.internal === true || tool.delegates === true)
+  if (!tool || isComputerToolName(tool.name)) return false
+  return tool.readOnly === true || tool.internal === true || tool.delegates === true
 }
 
 /**
@@ -419,7 +432,7 @@ export function isPlanTool(tool: Tool<unknown> | undefined): boolean {
  */
 export function withPlan(policy: PermissionPolicy): PermissionPolicy {
   return wrapPolicy(policy, (tool, args, options) =>
-    actsOnSomething(tool, args) ? 'deny' : policy.decide(tool, args, options),
+    isComputerToolName(tool.name) || actsOnSomething(tool, args) ? 'deny' : policy.decide(tool, args, options),
   )
 }
 
@@ -433,6 +446,25 @@ export function withPlan(policy: PermissionPolicy): PermissionPolicy {
 export function summarizeToolCall(args: unknown, tool?: string): string {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
+    if (tool === 'computer_open') {
+      if (typeof record.__approvalSummary === 'string' && record.__approvalSummary.trim()) {
+        return record.__approvalSummary.trim()
+      }
+      if (typeof record.windowId === 'string') {
+        return `Authorize observing desktop window ${record.windowId}${typeof record.pid === 'number' ? ` (pid ${record.pid})` : ''} for this turn`
+      }
+      if (typeof record.app === 'string' && record.app.trim()) {
+        return `Authorize opening desktop app "${record.app.trim()}" for this turn`
+      }
+      return 'Authorize desktop window access for this turn'
+    }
+    if (tool === 'computer_act') {
+      if (typeof record.__approvalSummary === 'string' && record.__approvalSummary.trim()) {
+        return record.__approvalSummary.trim()
+      }
+      const action = typeof record.action === 'string' ? record.action : 'act'
+      return `Desktop action: ${action}`
+    }
     if (tool === 'delegated_work') {
       const action = typeof record.action === 'string' ? record.action : 'create'
       const objective = typeof record.objective === 'string' ? record.objective : typeof record.currentObjective === 'string' ? record.currentObjective : ''

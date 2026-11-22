@@ -3,6 +3,7 @@ import type { GenUiRender } from '../genui.js'
 import type { PanelRequest } from '../panel.js'
 import type { BotAuthor } from '../providers/types.js'
 import type { TodoItem } from '../todos.js'
+import type { ToolPreviewImage } from '../tools/types.js'
 import type { VerificationResult } from '../verification.js'
 
 export type AgentEvent =
@@ -21,6 +22,8 @@ export type AgentEvent =
        * transcript sent back to the model, which gets `result` and nothing else.
        */
       change?: FileChange[]
+      /** Live-only preview frame for web/iOS expanded tool rows; never persisted or sent to the model. */
+      previewImage?: ToolPreviewImage
     }
   /**
    * The plan the turn is keeping changed. A surface draws the whole list from

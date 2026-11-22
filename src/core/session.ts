@@ -9,6 +9,13 @@ import { readImageBase64 } from './images.js'
 import { readFile } from 'node:fs/promises'
 import type { MediaModelsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
+import {
+  isComputerToolName,
+  sanitizeMessagesForPersistence,
+  sanitizeToolArgsForPersistence,
+  type ComputerFacts,
+  type ComputerManager,
+} from './computer/index.js'
 import type { GoogleState } from './google/state.js'
 import type { McpFacts } from './mcp/servers.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
@@ -269,6 +276,8 @@ export interface SessionOptions {
   keepSnapshots?: number
   /** What the browser is right now, read per turn. Absent when there is none. */
   browser?: () => BrowserFacts | null
+  /** Native desktop Computer Use manager, when enabled. */
+  computer?: ComputerManager | null
   /** The external tool servers as they are, read per turn. Absent when there are none. */
   mcp?: () => McpFacts | null
   /** The Google grant as this run sees it. Absent when the runtime was built without it. */
@@ -633,6 +642,10 @@ export class Session {
    */
   private browserFacts(): BrowserFacts | null {
     return this.options.browser?.() ?? null
+  }
+
+  private computerFacts(turnId?: string): ComputerFacts | null {
+    return this.options.computer?.facts(turnId) ?? null
   }
 
   /**
@@ -1027,6 +1040,13 @@ export class Session {
     // across sessions via the `crew` tool, while `task` still records to crew.
     const crewToolAllowed = crew !== undefined && this.scope.gateway !== ROUTINE_GATEWAY
     const delegatedWork = opts?.sessionsAllowed === false || this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.delegatedWork
+    // Desktop access stays unavailable in Plan mode, routines, unattended delegation, shared chats, and headless runs.
+    const computerAllowed =
+      !plan &&
+      this.scope.gateway !== ROUTINE_GATEWAY &&
+      !this.options.strictGrants &&
+      opts?.sessionsAllowed !== false &&
+      opts?.ask !== undefined
 
     let targetBots: CrewBot[] = []
     if (this.record.botId) {
@@ -1054,6 +1074,7 @@ export class Session {
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
       .filter((tool) => tool.name !== 'crew' || crewToolAllowed)
       .filter((tool) => tool.name !== 'delegated_work' || delegatedWork !== undefined)
+      .filter((tool) => !isComputerToolName(tool.name) || computerAllowed)
       // A planning turn may read, keep Milo's own state, or delegate; it may not
       // write, run a command, commit, send a file, or prune the install's sessions.
       .filter((tool) => !plan || isPlanTool(registry.get(tool.name)))
@@ -1120,6 +1141,7 @@ export class Session {
       ...prompt,
       summary: this.summary,
       browser: this.browserFacts(),
+      computer: computerAllowed ? this.computerFacts(turnId) : null,
       mcp: this.mcpFacts(),
       google: this.options.google ?? null,
     })
@@ -1148,6 +1170,10 @@ export class Session {
     // The turn's one signal, one permission decision and one effort, shared by
     // the turn and by any subagent it delegates to.
     const abort = signal ?? new AbortController().signal
+    const onTurnAbort = () => {
+      this.options.computer?.releaseTurn(turnId)
+    }
+    abort.addEventListener('abort', onTurnAbort, { once: true })
     const inspectAttachmentImage = this.createAttachmentInspector(model, cannotSee, abort)
     // A model that declared it has no reasoning mode is not sent an effort: the
     // field is a guess about a mode it does not have, and some wires refuse it.
@@ -1292,6 +1318,10 @@ export class Session {
           sessionAdmin,
           sendFile,
           jobs: this.options.jobs ?? undefined,
+          turnId,
+          visionConfirmed: profile?.vision === true,
+          computerAllowed,
+          computer: computerAllowed ? (this.options.computer ?? undefined) : undefined,
           // A subtask runs in its own context, but under this turn's model,
           // tools, permissions and stop: the same `ask` puts the subagent's
           // confirmations to the user, and the same signal stops both.
@@ -1530,7 +1560,7 @@ export class Session {
                   kind: 'tool',
                   tool: {
                     name: event.name,
-                    args: running?.args ?? {},
+                    args: sanitizeToolArgsForPersistence(event.name, running?.args ?? {}),
                     result: event.result,
                     isError: event.isError,
                   },
@@ -1731,6 +1761,8 @@ export class Session {
         }
       }
       this.options.history?.append(entries)
+      this.options.computer?.releaseTurn(turnId)
+      abort.removeEventListener('abort', onTurnAbort)
       this.options.traces?.record({
         at: new Date().toISOString(),
         startedAt: new Date(startedAt).toISOString(),
@@ -2183,14 +2215,16 @@ export class Session {
    * would erase the turns the other writer added.
    */
   async persist(): Promise<void> {
-    this.record.messages = this.record.backend?.kind === 'command-code' ? [] : this.messages
+    const sanitizedMessages =
+      this.record.backend?.kind === 'command-code' ? [] : sanitizeMessagesForPersistence(this.messages)
+    this.record.messages = sanitizedMessages
     this.record.summary = this.summary
     // Strictly increasing: a recap names the transcript version it was written
     // from, and two writes inside the same millisecond would otherwise look
     // like one — leaving a recap that misses a turn forever marked current.
     this.record.updatedAt = Math.max(Date.now(), this.record.updatedAt + 1)
     this.record.version = this.baseVersion + 1
-    await this.store.save(this.record, this.baseVersion)
+    await this.store.save({ ...this.record, messages: sanitizedMessages }, this.baseVersion)
     this.baseVersion = this.record.version
   }
 

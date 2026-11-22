@@ -1,6 +1,7 @@
 import { resolveToolPath } from './tools/walk.js'
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
+import type { ComputerManager } from './computer/index.js'
 import type { JobManager } from './jobs/index.js'
 import type { Classifier } from './classifier/index.js'
 import type { GoogleState } from './google/state.js'
@@ -144,6 +145,8 @@ export interface RuntimeOptions {
    * the machine to reap.
    */
   browser?: BrowserSession | null
+  /** Native desktop Computer Use manager, when enabled. */
+  computer?: ComputerManager | null
   /**
    * The external tool servers. They are processes with lifetimes, like the
    * browser, so they are let go on the way out instead of being left for the
@@ -601,6 +604,7 @@ export class AgentRuntime {
     // failure in one is not a reason to leave the rest of the way out undone.
     await Promise.allSettled([...this.cache.values()].map((session) => session.settle()))
     await this.options.browser?.close()
+    await this.options.computer?.close()
     await this.options.mcp?.close()
     await this.options.jobs?.close()
   }
@@ -613,6 +617,11 @@ export class AgentRuntime {
   /** The browser Milo drives, when one is configured. */
   get browser(): BrowserSession | null {
     return this.options.browser ?? null
+  }
+
+  /** Native desktop Computer Use manager, when enabled. */
+  get computer(): ComputerManager | null {
+    return this.options.computer ?? null
   }
 
   /**
@@ -921,6 +930,7 @@ export class AgentRuntime {
       // A getter, so the prompt says what the browser is now rather than what it
       // was when the runtime was built.
       browser: () => this.browser?.facts() ?? null,
+      computer: this.computer,
       // Likewise the servers, and for the reason the catalog cannot cover: a
       // server toggled, reloaded or reconnected since the runtime was built is in
       // the report, and one that is off or failed is in it too.

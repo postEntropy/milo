@@ -252,14 +252,26 @@ export function dropOldSnapshots(messages: Message[], keep = KEEP_SNAPSHOTS_IN_C
     }
   }
   for (const part of snapshots.slice(0, Math.max(0, snapshots.length - keep))) {
-    const headline = part.content.split('\n', 1)[0] ?? ''
-    part.content = `${headline}\n[page snapshot dropped to keep the request small — its refs are dead: only the newest look's refs work, and one action spends them]`
+    if (part.persistedContent) {
+      part.content = `${part.persistedContent}\n[desktop snapshot dropped to keep the request small — its refs are dead; call computer_snapshot if you need fresh state]`
+      delete part.images
+    } else {
+      const headline = part.content.split('\n', 1)[0] ?? ''
+      part.content = `${headline}\n[page snapshot dropped to keep the request small — its refs are dead: only the newest look's refs work, and one action spends them]`
+    }
   }
 }
 
-/** The tools that answer with the page as it is, and whose answers are big. */
+/** The tools that answer with the page or desktop window as it is, and whose answers are big. */
 function isSnapshot(name: string): boolean {
-  return name === 'browser_open' || name === 'browser_snapshot' || name === 'browser_act'
+  return (
+    name === 'browser_open' ||
+    name === 'browser_snapshot' ||
+    name === 'browser_act' ||
+    name === 'computer_open' ||
+    name === 'computer_snapshot' ||
+    name === 'computer_act'
+  )
 }
 
 /**

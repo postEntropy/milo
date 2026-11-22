@@ -1,4 +1,6 @@
 import { errorMessage, isAbort } from '../../util/errors.js'
+import { sanitizeToolArgsForPersistence } from '../computer/sanitize.js'
+import { isComputerToolName, toActInput, type ComputerActArgs } from '../computer/tools.js'
 import { saveImage } from '../images.js'
 import { describeWhen } from '../routines.js'
 import { sleep } from '../providers/retry.js'
@@ -199,6 +201,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       }
     : undefined
 
+  try {
   for (let step = 0; step < maxSteps; step += 1) {
     // A message sent while this turn was running joins it here, at the one point
     // where the transcript is not halfway through a tool call.
@@ -367,7 +370,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         const record = (ok: boolean, extra: { output?: ToolResult; error?: string }): void => {
           options.trace?.traces.record({
             at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'tool.call', ok, ms: Date.now() - started,
-            purpose: tag?.purpose ?? 'chat', tool: call.name, callId: call.id, input: call.args,
+            purpose: tag?.purpose ?? 'chat', tool: call.name, callId: call.id, input: sanitizeToolArgsForPersistence(call.name, call.args),
             ...(tag?.surface ? { surface: tag.surface } : {}),
             ...(tag?.session ? { session: tag.session } : {}),
             ...(tag?.turn ? { turn: tag.turn } : {}),
@@ -378,7 +381,15 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           const result = tag
             ? await withTraceContext({ turn: tag.turn, session: tag.session, surface: tag.surface, callId: call.id }, () => executeCall(options.permission, registry, call, context))
             : await executeCall(options.permission, registry, call, context)
-          record(!result.isError, { output: result })
+          const tracedOutput: ToolResult =
+            result.persistedContent !== undefined || result.ephemeralImages || result.previewImage
+              ? {
+                  content: result.persistedContent ?? result.content,
+                  ...(result.isError ? { isError: true } : {}),
+                  ...(result.blocked ? { blocked: true } : {}),
+                }
+              : result
+          record(!result.isError, { output: tracedOutput })
           return result
         } catch (error) {
           const message = errorMessage(error)
@@ -410,9 +421,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
             type: 'tool-end',
             id: call.id,
             name: call.name,
-            result: result.content,
+            result: result.persistedContent ?? result.content,
             isError: Boolean(result.isError),
             ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
+            ...(result.previewImage ? { previewImage: result.previewImage } : {}),
           }
           // Said whether or not the call reported a failure: a command that exits nonzero
           // has usually written some of what it was doing, and a screen left showing the
@@ -427,7 +439,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           // The panel is the same shape of display state: the web gateway resolves
           // the request into a view, and none of it goes back to the model.
           if (result.panel) yield { type: 'panel', request: result.panel }
-          const images = await persistImages(result.images)
+          const images: ImageRef[] = result.ephemeralImages
+            ? (result.images ?? []).filter((img) => Boolean(img.data)).map((img) => ({ mimeType: img.mimeType, path: '', inlineData: img.data }))
+            : await persistImages(result.images)
           answeredIds.add(call.id)
           messages.push({
             role: 'tool',
@@ -439,6 +453,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
                 content: result.content,
                 isError: result.isError,
                 ...(images.length > 0 ? { images } : {}),
+                ...(result.persistedContent !== undefined ? { persistedContent: result.persistedContent } : {}),
                 ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
               },
             ],
@@ -492,6 +507,33 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     message: closing
       ? `Stopped after ${maxSteps} steps — it answered with what it had.`
       : `Stopped after ${maxSteps} steps without a final answer.`,
+  }
+  } finally {
+    scrubEphemeralResults(messages)
+  }
+}
+
+/**
+ * Replaces active-turn-only tool results (such as desktop screenshots and raw
+ * accessibility trees) with their short persisted summaries once the turn ends.
+ */
+function scrubEphemeralResults(messages: Message[]): void {
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part.type === 'tool-call' && isComputerToolName(part.name)) {
+        part.args = sanitizeToolArgsForPersistence(part.name, part.args)
+        continue
+      }
+      if (part.type !== 'tool-result') continue
+      if (part.persistedContent !== undefined) {
+        part.content = part.persistedContent
+        delete part.persistedContent
+        delete part.images
+      } else if (part.images?.some((image) => Boolean(image.inlineData))) {
+        part.images = part.images.filter((image) => !image.inlineData)
+        if (part.images.length === 0) delete part.images
+      }
+    }
   }
 }
 
@@ -553,6 +595,13 @@ async function executeCall(
   call: { id: string; name: string; args: unknown },
   context: ToolContext,
 ): Promise<ToolResult> {
+  if (isComputerToolName(call.name) && context.computerAllowed === false) {
+    return {
+      content: 'Computer Use is unavailable in this turn (disabled in Plan mode, routines, unattended delegation, shared chats, and headless runs).',
+      isError: true,
+      blocked: true,
+    }
+  }
   let approvalArgs = call.args
   if (call.name === 'delegated_work' && call.args && typeof call.args === 'object' && context.delegatedWork) {
     const args = call.args as Record<string, unknown>
@@ -591,11 +640,69 @@ async function executeCall(
       }
       approvalArgs = { ...args, name: bot.name, assignments: bot.assignments.length }
     }
+  } else if (call.name === 'computer_open' && call.args && typeof call.args === 'object' && context.computer) {
+    if (context.computerAllowed === false) {
+      return {
+        content: 'Computer Use is unavailable in this turn (disabled in Plan mode, routines, unattended delegation, and shared chats).',
+        isError: true,
+        blocked: true,
+      }
+    }
+    const args = call.args as { windowId?: string; pid?: number; app?: string; launch?: boolean }
+    const resolved = await context.computer.resolveOpenTarget(args, context.signal)
+    if (resolved.kind === 'not_found') {
+      return { content: resolved.message, isError: true }
+    }
+    if (resolved.kind === 'ambiguous') {
+      const list = resolved.candidates
+        .map((w) => `- windowId=${w.windowId} pid=${w.pid} app="${w.appName}" title="${w.title || '(untitled)'}"`)
+        .join('\n')
+      return {
+        content: `Multiple open windows matched "${args.app}". Call computer_open again with one exact windowId:\n\n${list}`,
+        persistedContent: `Ambiguous window target "${args.app}" (${resolved.candidates.length} candidates).`,
+        isError: true,
+      }
+    }
+    if (resolved.kind === 'exact') {
+      const w = resolved.window
+      if (context.turnId) context.computer.stagePendingOpen(context.turnId, resolved)
+      const label = w.title.trim() ? `"${w.title.trim()}"` : '(untitled window)'
+      approvalArgs = {
+        ...args,
+        __approvalSummary: `Authorize observing window ${label} (${w.appName}, pid ${w.pid}, id ${w.windowId}) for this turn`,
+      }
+    } else {
+      if (context.turnId) context.computer.stagePendingOpen(context.turnId, resolved)
+      approvalArgs = {
+        ...args,
+        __approvalSummary: `Launch app "${resolved.app}" and authorize observing its window for this turn`,
+      }
+    }
+  } else if (call.name === 'computer_act' && call.args && typeof call.args === 'object' && context.computer && context.turnId) {
+    if (context.computerAllowed === false) {
+      return {
+        content: 'Computer Use is unavailable in this turn (disabled in Plan mode, routines, unattended delegation, and shared chats).',
+        isError: true,
+        blocked: true,
+      }
+    }
+    const planned = await context.computer.planAction(context.turnId, toActInput(call.args as ComputerActArgs), context.signal)
+    if (!planned.ok) {
+      return { content: planned.error, isError: true }
+    }
+    context.computer.stagePendingAction(context.turnId, planned)
+    approvalArgs = {
+      ...(call.args as Record<string, unknown>),
+      __approvalSummary: planned.summary,
+    }
   }
   const blocked = await checkPermission(permission, registry, call.name, approvalArgs, context)
-  return blocked
-    ? { content: blocked, isError: true, blocked: true }
-    : registry.execute(call.name, call.args, context)
+  if (blocked) {
+    if (call.name === 'computer_open' && context.turnId) context.computer?.takePendingOpen(context.turnId)
+    if (call.name === 'computer_act' && context.turnId) context.computer?.takePendingAction(context.turnId)
+    return { content: blocked, isError: true, blocked: true }
+  }
+  return registry.execute(call.name, call.args, context)
 }
 
 /**
@@ -637,7 +744,12 @@ async function checkPermission(
     permission?.policy.mode === 'yolo' &&
     name === 'crew' &&
     Boolean(args && typeof args === 'object' && (args as Record<string, unknown>).action === 'remove')
-  const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing && !yoloCrewRemove
+  const yoloComputer =
+    permission?.policy.mode === 'yolo' &&
+    Boolean(permission.ask) &&
+    context.computerAllowed !== false &&
+    (name === 'computer_open' || name === 'computer_act')
+  const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing && !yoloCrewRemove && !yoloComputer
   if (!permission) return mustConfirm ? `Tool "${name}" requires confirmation, but this surface cannot ask the user.` : null
 
   const cwd = permission.cwd ?? context.cwd

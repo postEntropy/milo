@@ -90,6 +90,8 @@ export async function saveIncomingImage(input: { mimeType: string; data: Uint8Ar
 
 /** The picture's bytes, base64, or null when it has been evicted meanwhile. */
 export function readImageBase64(ref: ImageRef): string | null {
+  if (ref.inlineData) return ref.inlineData
+  if (!ref.path) return null
   try {
     return readFileSync(ref.path).toString('base64')
   } catch {

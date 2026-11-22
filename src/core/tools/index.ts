@@ -2,6 +2,8 @@ import type { SearchProvider } from '../search/index.js'
 import type { SkillLibrary } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
+import type { ComputerManager } from '../computer/index.js'
+import { createComputerTools } from '../computer/index.js'
 import type { Classifier } from '../classifier/index.js'
 import type { JobManager } from '../jobs/index.js'
 import type { GoogleAccount } from '../config/schema.js'
@@ -140,6 +142,8 @@ export interface ToolRegistryOptions {
   skills?: SkillLibrary
   /** The browser, when one is configured — its three tools ride along with it. */
   browser?: BrowserSession | null
+  /** Native desktop Computer Use manager, when enabled. */
+  computer?: ComputerManager | null
   /**
    * Google, when the config asks for it. Registered even with a null account:
    * the tools then answer "not connected, run `milo google connect`", which is a
@@ -178,6 +182,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   if (options.search) tools.push(createWebSearchTool(options.search))
   if (options.skills && options.skills.list().length > 0) tools.push(createReadSkillTool(options.skills))
   if (options.browser) tools.push(...createBrowserTools(options.browser))
+  if (options.computer) tools.push(...createComputerTools(options.computer))
   if (options.google) {
     tools.push(...createGmailTools(options.google.account))
     tools.push(...createDriveTools(options.google.account))

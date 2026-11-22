@@ -9,6 +9,7 @@ import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
 import type { McpFacts } from '../mcp/servers.js'
 import { isPlanTool } from '../tools/permission.js'
+import { isComputerToolName } from '../computer/tools.js'
 import { runAgent, type ToolPermission } from './loop.js'
 import { buildSystemPrompt, SUBAGENT_SYSTEM_PROMPT, type SystemPromptBot } from './system.js'
 
@@ -104,7 +105,8 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
         tool.name !== 'sessions' &&
         tool.name !== 'panel' &&
         tool.name !== 'job_status' &&
-        tool.name !== 'job_kill',
+        tool.name !== 'job_kill' &&
+        !isComputerToolName(tool.name),
     )
     .filter((tool) => !options.plan || isPlanTool(options.registry.get(tool.name)))
   const system = buildSystemPrompt({

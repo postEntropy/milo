@@ -346,6 +346,19 @@ export const DEFAULT_BROWSER: BrowserConfig = {
 }
 
 /**
+ * Native desktop Computer Use. Off until explicitly enabled, so the four desktop
+ * tools stay out of the catalog when unused.
+ */
+export const ComputerSchema = z.object({
+  enabled: z.boolean().default(false),
+})
+export type ComputerConfig = z.infer<typeof ComputerSchema>
+
+export const DEFAULT_COMPUTER: ComputerConfig = {
+  enabled: false,
+}
+
+/**
  * The web UI: the browser chat `milo serve` starts beside the bots. On by
  * default, because a surface nobody can start is not really a surface; turn it
  * off here or with `milo serve --no-web` and the daemon serves the bots alone.
@@ -478,6 +491,7 @@ export const ConfigSchema = z.object({
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
   classifier: ClassifierSchema.default(DEFAULT_CLASSIFIER),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
+  computer: ComputerSchema.default(DEFAULT_COMPUTER),
   google: GoogleSchema.default(DEFAULT_GOOGLE),
   jobs: JobsSchema.default(DEFAULT_JOBS),
   /** How `shell_command` is contained. `workspace` uses `bwrap`; off by default. */

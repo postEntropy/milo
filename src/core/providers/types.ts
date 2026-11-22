@@ -78,6 +78,8 @@ export type ImageMime = 'image/png' | 'image/jpeg'
 export interface ImageRef {
   mimeType: ImageMime
   path: string
+  /** In-memory base64 image for active-turn-only tool results (never written to disk). */
+  inlineData?: string
 }
 
 export interface ToolResultPart {
@@ -86,8 +88,13 @@ export interface ToolResultPart {
   name: string
   content: string
   isError?: boolean
-  /** Pictures to show the model with this result. The wires inline them from disk. */
+  /** Pictures to show the model with this result. The wires inline them from disk or memory. */
   images?: ImageRef[]
+  /**
+   * Short summary that replaces `content` (and strips `images`) once the active turn ends,
+   * keeping raw desktop screenshots and accessibility trees out of persisted transcripts.
+   */
+  persistedContent?: string
   /**
    * What the call changed in the files. Kept with the result so a session read
    * back from disk draws the same change the live turn did; the wires send

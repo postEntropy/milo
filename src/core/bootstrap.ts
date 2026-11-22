@@ -2,6 +2,7 @@ import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { CrewStore } from './crew.js'
 import { DelegatedWorkStore } from './delegated-work.js'
 import { BrowserSession } from './browser/index.js'
+import { ComputerManager, CuaDriverAdapter } from './computer/index.js'
 import { chatGptModels } from './chatgpt/models.js'
 import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, scratchDir, skillsDir } from './config/paths.js'
 import { readAuth, readConfig, resolveClassifierKey, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
@@ -95,6 +96,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       })
     : null
 
+  const computer = loaded.config.computer.enabled
+    ? new ComputerManager(new CuaDriverAdapter())
+    : null
+
   // The embedding engine is a process with a lifetime, so it is brought up here
   // and taken down with this process. Not waited for: the first turn does not
   // need embeddings to answer, and recall falls back to words until it answers.
@@ -148,6 +153,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     search,
     skills,
     browser,
+    computer,
     google: google ? { account: google.account, classifier } : null,
     mcp,
     jobs,
@@ -230,6 +236,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // connection a fourth way. A grant made later needs a restart anyway.
     google: googleState(loaded.config, auth),
     browser,
+    computer,
     jobs,
     keepSnapshots: loaded.config.browser.keepSnapshots,
     memory,

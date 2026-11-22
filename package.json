@@ -34,6 +34,7 @@
     "check:browser": "tsx scripts/check-browser.ts"
   },
   "dependencies": {
+    "@trycua/cua-driver": "^0.56.4",
     "discord.js": "^14.27.0",
     "grammy": "^1.46.0",
     "ink": "^7.1.1",

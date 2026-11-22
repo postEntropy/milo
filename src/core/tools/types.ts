@@ -10,6 +10,7 @@ import type { SessionSummary } from '../sessions/types.js'
 import type { TodoItem } from '../todos.js'
 import type { CrewStore } from '../crew.js'
 import type { DelegatedWorkStore } from '../delegated-work.js'
+import type { ComputerManager } from '../computer/session.js'
 
 /**
  * How a session hands a tool the ability to write to its memory. Injected
@@ -151,6 +152,14 @@ export interface ToolContext {
    * falls back to running in the foreground and says so.
    */
   jobs?: JobManager
+  /** Unique id of the currently running turn, used to scope desktop window authorization. */
+  turnId?: string
+  /** True only when the active model has confirmed vision support. */
+  visionConfirmed?: boolean
+  /** False in Plan mode, routines, unattended delegation, and shared chats. */
+  computerAllowed?: boolean
+  /** Shared desktop manager, when Computer Use is enabled. */
+  computer?: ComputerManager
 }
 
 /**
@@ -164,6 +173,13 @@ export interface ToolImage {
   data: string
 }
 
+export interface ToolPreviewImage {
+  mimeType: ImageMime
+  data: string
+  width: number
+  height: number
+}
+
 export interface ToolResult {
   content: string
   isError?: boolean
@@ -174,6 +190,16 @@ export interface ToolResult {
    */
   blocked?: boolean
   images?: ToolImage[]
+  /** When true, images stay in active-turn memory only and are never written to disk or traces. */
+  ephemeralImages?: boolean
+  /** Short summary written to history, transcripts, exports, and traces instead of raw content. */
+  persistedContent?: string
+  /**
+   * Optional display-only preview frame from this call, forwarded to the web/iOS
+   * in-memory preview cache and never written to transcripts, history, exports,
+   * traces, or model input.
+   */
+  previewImage?: ToolPreviewImage
   /**
    * What this call changed in the files, when it wrote something. Display state,
    * like `todos`: the tool knows the file before and after, and no surface can
