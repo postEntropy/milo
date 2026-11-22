@@ -19,7 +19,12 @@ import {
   type ChatGptLogin,
 } from '../../core/chatgpt/auth.js'
 import { googleToolNames, googleWriteToolNames } from '../../core/tools/index.js'
-import { CuaDriverAdapter, type ComputerCapabilityStatus } from '../../core/computer/index.js'
+import {
+  probeComputerStatus,
+  withComputerSetupHelp,
+  type ComputerCapabilityStatus,
+  type ComputerStatusWithHelp,
+} from '../../core/computer/index.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS } from '../../core/google/tiers.js'
 import {
@@ -887,19 +892,16 @@ export class WebSettings {
 
   private cachedComputerStatus: ComputerCapabilityStatus | null = null
 
-  private async probeComputer(fresh = false): Promise<ComputerCapabilityStatus> {
+  private async probeComputer(fresh = false): Promise<ComputerStatusWithHelp> {
     if (this.runtime.computer) {
-      return this.runtime.computer.probe(undefined, { fresh })
+      return withComputerSetupHelp(await this.runtime.computer.probe(undefined, { fresh }))
     }
-    if (!fresh && this.cachedComputerStatus) return this.cachedComputerStatus
-    const adapter = new CuaDriverAdapter()
-    try {
-      const status = await adapter.probe()
-      this.cachedComputerStatus = status
-      return status
-    } finally {
-      await adapter.close()
+    if (!fresh && this.cachedComputerStatus) {
+      return withComputerSetupHelp(this.cachedComputerStatus)
     }
+    const status = await probeComputerStatus(null)
+    this.cachedComputerStatus = status
+    return withComputerSetupHelp(status)
   }
 
   private async browsers(): Promise<unknown> {

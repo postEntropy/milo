@@ -16,7 +16,7 @@ import {
   type ProfileOrigin,
   type ProfileSource,
 } from '../../../core/browser/index.js'
-import { CuaDriverAdapter, type ComputerCapabilityStatus } from '../../../core/computer/index.js'
+import { probeComputerStatus, type ComputerCapabilityStatus } from '../../../core/computer/index.js'
 import { mutateConfig, mutateAuth } from '../../../core/settings.js'
 import { readAuth } from '../../../core/config/load.js'
 import {
@@ -371,12 +371,7 @@ export function SettingsScreen({
 
   const [computerStatus, setComputerStatus] = useState<ComputerCapabilityStatus | null>(null)
   const probeComputer = useCallback(async (): Promise<void> => {
-    const adapter = new CuaDriverAdapter()
-    try {
-      setComputerStatus(await adapter.probe())
-    } finally {
-      await adapter.close()
-    }
+    setComputerStatus(await probeComputerStatus(null))
   }, [])
 
   /** The profile in use, and whether the browser will refuse to open it. */

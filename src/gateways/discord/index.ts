@@ -400,7 +400,7 @@ export class DiscordGateway implements Gateway {
           ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
           : []
         await this.replyChunked(message, command.markdown ?? command.reply ?? '', components)
-        return
+        if (!command.prompt) return
       }
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
@@ -433,6 +433,8 @@ export class DiscordGateway implements Gateway {
       typing: () => this.typing(message.channel),
     }
 
+    const activeSession = command.prompt ? await this.options.runtime.sessionFor(scope) : session
+    const turnText = command.prompt ?? text
     const display = readDisplay()
     const ignoreMentions = [
       'everyone',
@@ -440,9 +442,9 @@ export class DiscordGateway implements Gateway {
       ...(message.client.user?.username ? [message.client.user.username] : []),
     ]
     const failure = await runTurns({
-      session,
+      session: activeSession,
       chatId: message.channelId,
-      text,
+      text: turnText,
       surface,
       maxLength: MAX_LENGTH,
       display,

@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 import type { AgentEvent } from '../src/core/agent/events.js'
+import { OMARCHY_ACTIVATION_GUIDE, type ComputerManager } from '../src/core/computer/index.js'
 import type { DisplayConfig } from '../src/core/config/schema.js'
 import type { AgentRuntime } from '../src/core/runtime.js'
 import type { PermissionMode } from '../src/core/tools/permission.js'
@@ -1369,6 +1370,72 @@ describe('ChatScreen — queue and steer', () => {
     expect(sent.map((turn) => turn.text)).toEqual(['first'])
     expect(lastFrame()).toContain('1 queued message dropped')
     expect(lastFrame()).not.toContain('thinking…')
+  })
+
+  it('starts a new session and sends the core setup help prompt on /computer setup', async () => {
+    const sent: Array<{ sessionId: string; text: string }> = []
+    let activeSession = {
+      id: 'initial-1',
+      messages: [],
+      send: (text: string) => {
+        sent.push({ sessionId: 'initial-1', text })
+        async function* stream(): AsyncGenerator<AgentEvent> {
+          yield { type: 'done', finishReason: 'stop' }
+        }
+        return stream()
+      },
+    }
+    const status = {
+      available: true,
+      platform: 'linux' as const,
+      sdkVersion: '0.56.4',
+      displayServer: 'wayland+xwayland' as const,
+      waylandEnabled: true,
+      atspiAvailable: true,
+      screenCaptureAvailable: true,
+      inputModes: {
+        accessibility: true,
+        windowScopedPointer: false,
+        xsendEvent: false,
+        hyprlandPlugin: false,
+      },
+      hyprlandPluginState: 'installed_not_loaded' as const,
+      limitations: ['Hyprland Cua plugin is installed but not loaded in the compositor.'],
+      summary: 'Ready (Hyprland plugin installed, not loaded)',
+    }
+    const runtime = {
+      computer: {
+        probe: async () => status,
+      } as unknown as ComputerManager,
+      getSession: async () => activeSession,
+      newSession: async () => {
+        activeSession = {
+          id: 'setup-2',
+          messages: [],
+          send: (text: string) => {
+            sent.push({ sessionId: 'setup-2', text })
+            async function* stream(): AsyncGenerator<AgentEvent> {
+              yield { type: 'text-delta', delta: 'Checking host state.' }
+              yield { type: 'done', finishReason: 'stop' }
+            }
+            return stream()
+          },
+        }
+        return activeSession
+      },
+    } as unknown as AgentRuntime
+
+    const switched: string[] = []
+    const { lastFrame, stdin } = renderChat(runtime, {
+      onSessionChange: (id) => switched.push(id),
+    })
+    await submit(stdin, '/computer setup')
+
+    await waitUntil(() => sent.length === 1 && (lastFrame() ?? '').includes('Checking host state.'))
+    expect(switched).toEqual(['setup-2'])
+    expect(sent[0]?.sessionId).toBe('setup-2')
+    expect(sent[0]?.text).toContain('installed_not_loaded')
+    expect(sent[0]?.text).toContain(OMARCHY_ACTIVATION_GUIDE)
   })
 })
 

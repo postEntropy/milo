@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Classifier } from '../src/core/classifier/index.js'
 import type { McpServers } from '../src/core/mcp/servers.js'
+import {
+  COMPUTER_SETUP_HELP_LABEL,
+  OMARCHY_ACTIVATION_GUIDE,
+  hyprlandPluginLimitation,
+  type ComputerCapabilityStatus,
+  type ComputerManager,
+  type HyprlandPluginState,
+} from '../src/core/computer/index.js'
 import { stringify } from 'yaml'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -1701,5 +1709,201 @@ describe('Session export delivery', () => {
     expect(downloaded.content).toBe(readFileSync(downloaded.path, 'utf8'))
     expect(downloaded.content).toContain('Keep this exported text.')
     expect(await settings.handle('export', { id: 'never-ran-1', download: true })).toBeNull()
+  })
+})
+
+describe('Computer Use setup help across WebSettings and WebHub', () => {
+  function hyprlandStatus(state: HyprlandPluginState): ComputerCapabilityStatus {
+    const limitation = hyprlandPluginLimitation(state)
+    const tag =
+      state === 'loaded_discovery_only'
+        ? 'Hyprland plugin loaded. Background input unavailable.'
+        : state === 'loaded_disabled'
+          ? 'Hyprland plugin loaded, input disabled'
+          : state === 'input_available'
+            ? 'Hyprland input ready'
+            : state
+    return {
+      available: true,
+      platform: 'linux',
+      sdkVersion: '0.56.4',
+      displayServer: 'wayland+xwayland',
+      waylandEnabled: true,
+      atspiAvailable: true,
+      screenCaptureAvailable: true,
+      inputModes: {
+        accessibility: true,
+        windowScopedPointer: state === 'input_available',
+        xsendEvent: false,
+        hyprlandPlugin: state === 'input_available',
+      },
+      hyprlandPluginState: state,
+      limitations: limitation ? [limitation] : [],
+      summary: `Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready · ${tag})`,
+    }
+  }
+
+  it('attaches setupHelp in overview and computer-status across discovery-only, disabled, and ready transitions', async () => {
+    writeConfig()
+    let currentState: HyprlandPluginState = 'loaded_discovery_only'
+    const fakeComputer = {
+      probe: vi.fn(async () => hyprlandStatus(currentState)),
+      facts: () => ({ enabled: true, status: hyprlandStatus(currentState), boundWindow: null }),
+    } as unknown as ComputerManager
+
+    const runtime = new AgentRuntime({
+      provider: { id: 'test', stream: async function* () {} },
+      model: 'test-model',
+      system: '',
+      registry: { specs: () => [] } as never,
+      memory: {
+        remember: async () => undefined,
+        recall: async () => [],
+        list: async () => [],
+        forget: async () => false,
+      } as never,
+      cwd: home,
+      computer: fakeComputer,
+    })
+
+    const settings = new WebSettings(runtime, home)
+    const overview = (await settings.handle('overview')) as {
+      computer: ComputerCapabilityStatus & { setupHelp: { label: string; state: string; prompt: string } | null }
+    }
+    expect(overview.computer.available).toBe(true)
+    expect(overview.computer.screenCaptureAvailable).toBe(true)
+    expect(overview.computer.atspiAvailable).toBe(true)
+    expect(overview.computer.hyprlandPluginState).toBe('loaded_discovery_only')
+    expect(overview.computer.summary).toContain('Hyprland plugin loaded. Background input unavailable.')
+    expect(overview.computer.setupHelp?.label).toBe(COMPUTER_SETUP_HELP_LABEL)
+    expect(overview.computer.setupHelp?.state).toBe('loaded_discovery_only')
+    expect(overview.computer.setupHelp?.prompt).toContain('current Omarchy channel')
+    expect(overview.computer.setupHelp?.prompt).not.toContain('plugin:cua:enabled')
+
+    currentState = 'installed_not_loaded'
+    const notLoaded = (await settings.handle('computer-status')) as {
+      setupHelp: { label: string; state: string; prompt: string } | null
+    }
+    expect(notLoaded.setupHelp?.state).toBe('installed_not_loaded')
+    expect(notLoaded.setupHelp?.prompt).toContain(OMARCHY_ACTIVATION_GUIDE)
+
+    currentState = 'loaded_disabled'
+    const disabled = (await settings.handle('computer-status')) as {
+      summary: string
+      setupHelp: { label: string; state: string; prompt: string } | null
+    }
+    expect(disabled.summary).toContain('Hyprland plugin loaded, input disabled')
+    expect(disabled.setupHelp?.state).toBe('loaded_disabled')
+    expect(disabled.setupHelp?.prompt).toContain('plugin:cua:enabled')
+
+    currentState = 'input_available'
+    const ready = (await settings.handle('computer-status')) as {
+      available: boolean
+      summary: string
+      setupHelp: unknown
+    }
+    expect(ready.available).toBe(true)
+    expect(ready.summary).toContain('Hyprland input ready')
+    expect(ready.setupHelp).toBeNull()
+
+    currentState = 'not_applicable'
+    const nonHyprland = (await settings.handle('computer-status')) as { setupHelp: unknown }
+    expect(nonHyprland.setupHelp).toBeNull()
+
+    for (const nonEnabledState of [
+      'loaded_abi_mismatch',
+      'loaded_unsupported_protocol',
+      'loaded_transport_stopped',
+      'unverified',
+    ] as const) {
+      currentState = nonEnabledState
+      const resp = (await settings.handle('computer-status')) as {
+        summary: string
+        limitations: string[]
+        setupHelp: unknown
+      }
+      expect(resp.setupHelp).toBeNull()
+      expect(resp.summary).not.toContain('plugin:cua:enabled')
+      expect(resp.summary).not.toContain('reload')
+      expect(resp.limitations.join('\n')).not.toContain('plugin:cua:enabled')
+      expect(resp.limitations.join('\n')).not.toContain('reload')
+    }
+  })
+
+  it('starts a new session and immediately dispatches the help prompt on /computer setup in WebHub', async () => {
+    writeConfig()
+    const seenUsers: string[] = []
+    const status = hyprlandStatus('installed_not_loaded')
+    const releaseTurnSpy = vi.fn()
+    const fakeComputer = {
+      probe: vi.fn(async () => status),
+      facts: () => ({ enabled: true, status, boundWindow: null }),
+      releaseTurn: releaseTurnSpy,
+    } as unknown as ComputerManager
+
+    const runtime = new AgentRuntime({
+      provider: {
+        id: 'test',
+        stream: async function* (req) {
+          const lastUser = req.messages.filter((m) => m.role === 'user').at(-1)
+          const text = lastUser?.content.map((p) => (p.type === 'text' ? p.text : '')).join('') ?? ''
+          seenUsers.push(text)
+          yield { type: 'text', delta: 'Checked host state.' }
+          yield { type: 'done', finishReason: 'stop' }
+        },
+      },
+      model: 'test-model',
+      system: '',
+      registry: { specs: () => [] } as never,
+      memory: {
+        remember: async () => undefined,
+        recall: async () => [],
+        list: async () => [],
+        forget: async () => false,
+      } as never,
+      cwd: home,
+      computer: fakeComputer,
+    })
+
+    const hub = new WebHub(runtime, home)
+    const frames: Array<{
+      type: string
+      sessionId?: string
+      reply?: string
+      text?: string
+      status?: string
+      event?: { type?: string; message?: string; delta?: string }
+    }> = []
+    const client = { send: (frame: unknown) => frames.push(frame as (typeof frames)[number]) }
+    const initial = await runtime.getSession({ gateway: 'web', chatId: CHAT })
+    await hub.connect(client, CHAT)
+    frames.length = 0
+
+    hub.handle(client, { type: 'command', text: '/computer setup' }, CHAT)
+
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline && !frames.some((f) => f.type === 'turn-end')) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+
+    const commandResult = frames.find((f) => f.type === 'command-result')
+    const turnStart = frames.find((f) => f.type === 'turn-start')
+    const turnEnd = frames.find((f) => f.type === 'turn-end')
+    const errorEvent = frames.find((f) => f.type === 'event' && f.event?.type === 'error')
+    const deltas = frames
+      .filter((f) => f.type === 'event' && f.event?.type === 'text-delta')
+      .map((f) => f.event?.delta ?? '')
+      .join('')
+
+    expect(commandResult).toBeDefined()
+    expect(commandResult?.sessionId).toBeDefined()
+    expect(commandResult?.sessionId).not.toBe(initial.id)
+    expect(turnStart?.text).toContain('installed_not_loaded')
+    expect(turnStart?.text).toContain(OMARCHY_ACTIVATION_GUIDE)
+    expect(seenUsers[0]).toBe(turnStart?.text)
+    expect(errorEvent).toBeUndefined()
+    expect(turnEnd?.status).toBe('done')
+    expect(deltas).toContain('Checked host state.')
+    expect(releaseTurnSpy).toHaveBeenCalled()
   })
 })

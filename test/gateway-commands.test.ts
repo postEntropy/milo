@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import {
+  computerSetupHelp,
+  hyprlandPluginLimitation,
+  OMARCHY_ACTIVATION_GUIDE,
+  type ComputerCapabilityStatus,
+} from '../src/core/computer/index.js'
 import type { DisplayConfig } from '../src/core/config/schema.js'
 import type { ReasoningEffort } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
@@ -1263,5 +1269,141 @@ describe('/export', () => {
   it('says so on a surface that has nothing to export from', async () => {
     const result = await handleCommand('/export', {})
     expect(result.reply).toContain('cannot export')
+  })
+})
+
+describe('/computer setup', () => {
+  function computerStatus(overrides: Partial<ComputerCapabilityStatus> = {}): ComputerCapabilityStatus {
+    return {
+      available: true,
+      platform: 'linux',
+      sdkVersion: '0.56.4',
+      displayServer: 'wayland+xwayland',
+      waylandEnabled: true,
+      atspiAvailable: true,
+      screenCaptureAvailable: true,
+      inputModes: {
+        accessibility: true,
+        windowScopedPointer: false,
+        xsendEvent: false,
+        hyprlandPlugin: false,
+      },
+      limitations: [],
+      summary: 'Ready (SDK 0.56.4 · wayland+xwayland · AT-SPI ready · capture ready)',
+      ...overrides,
+    }
+  }
+
+  it('opens a new session with the core help prompt when the Hyprland plugin needs activation', async () => {
+    for (const state of ['installed_not_loaded', 'loaded_discovery_only', 'loaded_disabled'] as const) {
+      const status = computerStatus({
+        hyprlandPluginState: state,
+        limitations: [hyprlandPluginLimitation(state)!],
+      })
+      const created: string[] = []
+      const result = await handleCommand('/computer setup', {
+        probeComputer: async () => status,
+        newSession: async () => {
+          created.push(`sess-${state}`)
+          return { id: `sess-${state}` }
+        },
+      })
+
+      expect(created).toEqual([`sess-${state}`])
+      expect(result.handled).toBe(true)
+      expect(result.reply).toContain(`sess-${state}`)
+      expect(result.prompt).toBe(computerSetupHelp(status)!.prompt)
+      expect(result.prompt).toContain(OMARCHY_ACTIVATION_GUIDE)
+    }
+  })
+
+  it('omits creating a session when Hyprland input is already ready or not applicable', async () => {
+    let created = 0
+    const ready = await handleCommand('/computer setup', {
+      probeComputer: async () => computerStatus({ hyprlandPluginState: 'input_available' }),
+      newSession: async () => {
+        created += 1
+        return { id: 'should-not-open' }
+      },
+    })
+    expect(ready.handled).toBe(true)
+    expect(ready.prompt).toBeUndefined()
+    expect(ready.reply).toContain('already ready')
+
+    const nonHyprland = await handleCommand('/computer setup', {
+      probeComputer: async () => computerStatus({ hyprlandPluginState: 'not_applicable' }),
+      newSession: async () => {
+        created += 1
+        return { id: 'should-not-open' }
+      },
+    })
+    expect(nonHyprland.handled).toBe(true)
+    expect(nonHyprland.prompt).toBeUndefined()
+    expect(nonHyprland.reply).toContain('Hyprland Linux host')
+
+    for (const [state, expectedSnippet] of [
+      ['loaded_abi_mismatch', 'ABI does not match'],
+      ['loaded_unsupported_protocol', 'unsupported input protocol'],
+      ['loaded_transport_stopped', 'transport is stopped'],
+      ['unverified', 'could not be verified'],
+    ] as const) {
+      const outcome = await handleCommand('/computer setup', {
+        probeComputer: async () => computerStatus({ hyprlandPluginState: state }),
+        newSession: async () => {
+          created += 1
+          return { id: 'should-not-open' }
+        },
+      })
+      expect(outcome.handled).toBe(true)
+      expect(outcome.prompt).toBeUndefined()
+      expect(outcome.reply).toContain(expectedSnippet)
+      expect(outcome.reply).not.toContain('plugin:cua:enabled')
+      expect(outcome.reply).not.toContain('reload')
+    }
+    expect(created).toBe(0)
+  })
+
+  it('answers unknown or missing /computer subcommands with the valid usage and respects session locks', async () => {
+    let probed = false
+    const usageMissing = await handleCommand('/computer', {
+      probeComputer: async () => {
+        probed = true
+        return computerStatus()
+      },
+    })
+    expect(usageMissing.reply).toBe(
+      'Usage: /computer setup — start a new session to troubleshoot Hyprland Computer Use setup.',
+    )
+
+    const usageUnknown = await handleCommand('/computer status', {
+      probeComputer: async () => {
+        probed = true
+        return computerStatus()
+      },
+    })
+    expect(usageUnknown.reply).toBe(
+      'Usage: /computer setup — start a new session to troubleshoot Hyprland Computer Use setup.',
+    )
+    expect(probed).toBe(false)
+
+    const locked = await handleCommand('/computer setup', {
+      sessionLocked: 'Sessions are locked.',
+      probeComputer: async () => {
+        throw new Error('should not probe when locked')
+      },
+    })
+    expect(locked.reply).toBe('Sessions are locked.')
+  })
+
+  it('reports probe errors cleanly instead of failing in silence', async () => {
+    const errored = await handleCommand('/computer setup', {
+      probeComputer: async () => {
+        throw new Error('probe timed out')
+      },
+      newSession: async () => ({ id: 'unused' }),
+    })
+    expect(errored.handled).toBe(true)
+    expect(errored.prompt).toBeUndefined()
+    expect(errored.reply).toContain('probe timed out')
   })
 })

@@ -1307,6 +1307,10 @@ export class WebHub {
               sessionId: session.id,
               ...(session.bot ? { bot: session.bot } : {}),
             })
+            if (command.prompt) {
+              this.startTurn(chatId, command.prompt, undefined, [], undefined, undefined, undefined, undefined, ownerPrincipal)
+              return
+            }
             const queuedText = inbox.shift()
             if (queuedText?.startsWith('/')) {
               const queuedCommand = await handleCommand(queuedText, this.commandContext(chat, session, signal))
@@ -1322,6 +1326,10 @@ export class WebHub {
                   sessionId: chat.session.id,
                   ...(chat.session.bot ? { bot: chat.session.bot } : {}),
                 })
+                if (queuedCommand.prompt) {
+                  this.startTurn(chatId, queuedCommand.prompt, undefined, [], undefined, undefined, undefined, undefined, ownerPrincipal)
+                  return
+                }
               }
               currentText = inbox.shift() ?? ''
             } else {
@@ -1547,6 +1555,9 @@ export class WebHub {
         client.send(frame)
       } else {
         this.broadcastSession(beforeSessionId, chat.scope.chatId, frame)
+      }
+      if (response.prompt) {
+        this.startTurn(chat.scope.chatId, response.prompt, undefined, [], undefined, undefined, undefined, undefined, client.principal)
       }
     }, () => this.sendState(chat.scope.chatId))
   }

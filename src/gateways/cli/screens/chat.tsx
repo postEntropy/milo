@@ -17,6 +17,7 @@ import type {
   ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
+import { probeComputerStatus } from '../../../core/computer/index.js'
 import { formatBotAvatarBadge, normalizeBotHandle, resolveBotAvatar } from '../../../core/crew.js'
 import { incomingMime, MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
 import { saveCommandCodeAttachments } from '../../../core/command-code-attachments.js'
@@ -179,6 +180,7 @@ const BLOCKED_WHILE_BUSY = new Set([
   'setup',
   'compact',
   'folder',
+  'computer',
 ])
 
 /**
@@ -824,6 +826,7 @@ export function ChatScreen({
     memories: (limit, query, offset) => session.memories(limit, query, offset),
     updateMemory: (id, text) => session.updateMemory(id, text),
     forgetMemory: (id) => session.forget(id),
+    probeComputer: () => probeComputerStatus(runtime.computer, signal, { fresh: true }),
   })
 
   const runCommand = async (raw: string) => {
@@ -910,6 +913,12 @@ export function ChatScreen({
     const result = await handleCommand(raw, buildCliCommandContext(session))
     if (result.handled && result.reply) {
       push({ kind: 'info', text: result.reply })
+    }
+    if (result.handled && result.prompt) {
+      push({ kind: 'user', text: result.prompt })
+      queueRef.current.push({ text: result.prompt, images: [], audio: [] })
+      setQueued(queueRef.current.length)
+      pump()
     } else if (!result.handled) {
       push({ kind: 'info', text: `Unknown command: /${command} — try /help` })
     }

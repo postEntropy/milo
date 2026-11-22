@@ -55,6 +55,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     hint: 'write this session out as a file, tool calls and reasoning included',
   },
   { name: 'skills', hint: 'the skills installed, and where they live' },
+  { name: 'computer', usage: ' setup', hint: 'start a new session to troubleshoot Hyprland Computer Use setup' },
   { name: 'memory', usage: ' [search <words> | page <number> | edit <id> <text> | forget <id>]', hint: 'inspect and correct notes' },
   { name: 'clear', hint: 'forget this session' },
   { name: 'status', hint: 'permission mode and display settings' },

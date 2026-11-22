@@ -20,6 +20,12 @@ import {
 import type { ModelInfo } from '../core/providers/models.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 import { MEMORY_ID_CHARS, shortId, type MemoryItem } from '../core/memory/index.js'
+import {
+  computerSetupHelp,
+  computerSetupUnavailableReply,
+  probeComputerStatus,
+  type ComputerCapabilityStatus,
+} from '../core/computer/index.js'
 import type { TurnQueue } from './turns.js'
 import { buildSessionsList, type ActionContext, type ActionRow, type SessionCardItem } from './actions.js'
 import { projectNames } from '../core/projects.js'
@@ -102,11 +108,15 @@ export interface CommandContext {
   removeCrewBot?: (id: string) => Promise<CrewBot>
   delegatedWork?: () => DelegatedWork[]
   controlDelegatedWork?: (id: string, action: 'pause' | 'resume' | 'cancel') => Promise<DelegatedWork>
+  /** Probes host Computer Use capabilities for `/computer setup`. */
+  probeComputer?: () => Promise<ComputerCapabilityStatus>
 }
 
 export interface CommandResult {
   handled: boolean
   reply?: string
+  /** Optional prompt to dispatch immediately on the newly opened session. */
+  prompt?: string
   /** The same reply with Markdown, for surfaces that render it. */
   markdown?: string
   /** Optional interactive action buttons for surfaces that support them. */
@@ -261,7 +271,7 @@ export function modelLockMessage(options: LockOptions): string | undefined {
 /** Sessions are per-person: one member listing or switching them would expose the others'. */
 export function sessionLockMessage(options: LockOptions): string | undefined {
   return lockedTo(
-    '/new, /sessions, /resume, /fork, /folder, /clear, /crew and /delegated',
+    '/new, /sessions, /resume, /fork, /folder, /clear, /crew, /delegated and /computer',
     'Manage sessions from the terminal, or allow only your own id under Gateways.',
     options,
   )
@@ -363,6 +373,7 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     updateMemory: (id, text) => session.updateMemory(id, text),
     forgetMemory: (id) => session.forget(id),
     memoryLocked: memoryLockMessage(lock),
+    probeComputer: () => probeComputerStatus(runtime.computer, signal, { fresh: true }),
   }
 }
 
@@ -996,6 +1007,38 @@ export async function handleCommand(
         return { handled: true, reply: `Model: ${landed.model} — now answering with it. Saved for every surface.` }
       } catch (error) {
         return { handled: true, reply: errorMessage(error) }
+      }
+    }
+
+    case 'computer': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      const sub = argument.trim().toLowerCase()
+      if (sub !== 'setup') {
+        return {
+          handled: true,
+          reply: 'Usage: /computer setup — start a new session to troubleshoot Hyprland Computer Use setup.',
+        }
+      }
+      if (!context.probeComputer) {
+        return { handled: true, reply: 'Computer Use diagnostics are not available on this surface.' }
+      }
+      if (!context.newSession) {
+        return { handled: true, reply: 'Session switching is not available on this surface.' }
+      }
+      try {
+        const status = await context.probeComputer()
+        const help = computerSetupHelp(status)
+        if (!help) {
+          return { handled: true, reply: computerSetupUnavailableReply(status) }
+        }
+        const { id } = await context.newSession()
+        return {
+          handled: true,
+          reply: `Started a new session for Computer Use setup: ${id}.`,
+          prompt: help.prompt,
+        }
+      } catch (error) {
+        return { handled: true, reply: `Could not start Computer Use setup: ${errorMessage(error)}` }
       }
     }
 

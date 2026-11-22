@@ -369,7 +369,7 @@ export class TelegramGateway implements Gateway {
           )
       if (command.handled) {
         await this.reply(bot, chatId, command)
-        return
+        if (!command.prompt) return
       }
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
@@ -417,11 +417,13 @@ export class TelegramGateway implements Gateway {
       typing: () => this.typing(bot, chatId),
     }
 
+    const activeSession = command.prompt ? await this.options.runtime.sessionFor(scope) : session
+    const turnText = command.prompt ?? text
     const display = readDisplay()
     const failure = await runTurns({
-      session,
+      session: activeSession,
       chatId: chatId,
-      text,
+      text: turnText,
       surface,
       maxLength: MAX_LENGTH,
       display,
