@@ -59,6 +59,17 @@ step. Files, changes and rules are reached from the Session's folder menu. Exist
 records remain the shared folder registry. Read [docs/work.md](docs/work.md) before changing
 folder selection or inspection.
 
+## Browser
+
+- Revisit [OpenCode Browse](https://opencode.ai/product/browse) when working on Browser
+  settings, tool routing, or approvals. The proposal is an opt-in Browser connection for
+  a signed-in Chromium tab. Lending a tab explicitly selects Browse for the task, and
+  the person handles login or 2FA in the tab before choosing **Continue**.
+- Keep [Milo's isolated Browser](docs/browser.md) as the default for public links and
+  site testing. Computer Use handles native desktop apps. The Browse pilot validated
+  the handoff over MCP in `plain` mode. Before connecting a personal profile, verify
+  per-action approval in Ask mode and scope access to private, interactive Sessions.
+
 ## Agent
 
 - What a turn is told — the base persona, the model-family briefing, the project's code
