@@ -50,6 +50,12 @@ export function panelApiUrl(id: string): string {
   return `/panel/${encodeURIComponent(id)}`
 }
 
+/** Where an expanded Computer Use tool preview is fetched via authenticated `fetch()`. */
+export function toolPreviewUrl(id: string, callId: string, sessionId: string): string {
+  const params = new URLSearchParams({ callId, sessionId })
+  return `/api/tool-preview/${encodeURIComponent(id)}?${params.toString()}`
+}
+
 /** Where a panel artifact (`<img>` or `<iframe>`) is fetched via an artifact-scoped ticket. */
 export function panelTicketUrl(id: string, ticket: string): string {
   return `/panel/${encodeURIComponent(id)}?p=${encodeURIComponent(ticket)}`

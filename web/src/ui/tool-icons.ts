@@ -52,6 +52,10 @@ const TOOL_ICONS: Record<string, IconName> = {
   browser_snapshot: 'eye',
   browser_screenshot: 'camera',
   browser_act: 'cursor',
+  computer_list: 'monitor',
+  computer_open: 'panel-left',
+  computer_snapshot: 'eye',
+  computer_act: 'cursor',
   // Every email tool wears the one mail mark, so a call reads the same whichever
   // of them ran — the page of the mailbox, not the verb.
   gmail_search: 'mail-shield',

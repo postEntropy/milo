@@ -45,6 +45,7 @@ type SettingsConfig = {
   permissions: { mode: 'ask' | 'auto' | 'yolo'; allow: string[]; deny: string[]; jevThreshold: number; jevTimeoutMs: number }
   classifier: { backend: 'commandcode' | 'openai' | 'openrouter' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
   browser: { enabled: boolean; chromePath: string | null; headless: boolean; profileDir: string | null; cdpUrl: string | null; keepSnapshots: number }
+  computer: { enabled: boolean }
   search?: { provider: 'tavily' | 'exa' | 'parallel'; keyEnv?: string }
   systemPrompt?: string
   maxSteps?: number
@@ -56,6 +57,19 @@ type MemoryStats = { backend: string; location: string; scopes: number; facts: n
 type Note = { id: string; text: string; createdAt: number; source?: { session: string; quote: string } }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
+type ComputerStatus = {
+  available: boolean
+  platform: string
+  sdkVersion: string | null
+  displayServer: string
+  waylandEnabled: boolean
+  atspiAvailable: boolean
+  screenCaptureAvailable: boolean
+  inputModes: { accessibility: boolean; windowScopedPointer: boolean; xsendEvent: boolean; hyprlandPlugin: boolean }
+  limitations: string[]
+  reason?: string
+  summary: string
+}
 /** The access level a grant was made at, as the server names and describes it. */
 type GoogleTier = { id: 'none' | 'modify' | 'compose' | 'send'; label: string; description: string }
 /** The three states the server reports for the grant, with the tools it buys and the levels on offer. */
@@ -73,6 +87,7 @@ function tierOf(tiers: GoogleTier[], id: GoogleTier['id']): GoogleTier | undefin
 function restartReasonsFor(keys: ReadonlyArray<keyof SettingsConfig>, draft: SettingsConfig, saved: SettingsConfig): string[] {
   const reasons: string[] = []
   if (keys.includes('browser') && JSON.stringify(draft.browser) !== JSON.stringify(saved.browser)) reasons.push('Browser')
+  if (keys.includes('computer') && JSON.stringify(draft.computer) !== JSON.stringify(saved.computer)) reasons.push('Computer Use')
   if (keys.includes('web') && JSON.stringify(draft.web) !== JSON.stringify(saved.web)) reasons.push('Web host and port')
   if (keys.includes('classifier') && JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier)) reasons.push('Reviewer model')
   if (keys.includes('google') && JSON.stringify(draft.google) !== JSON.stringify(saved.google)) reasons.push('Google tools')
@@ -89,7 +104,7 @@ const SECTION_KEYS: Record<string, ReadonlyArray<keyof SettingsConfig>> = {
   memory: ['memory'],
   gateways: ['gateways'],
   web: ['web'],
-  tools: ['search', 'google', 'browser'],
+  tools: ['search', 'google', 'browser', 'computer'],
   permissions: ['permissions', 'classifier'],
   display: ['display'],
   sessions: ['sessions'],
@@ -119,7 +134,8 @@ type SettingsData = {
   sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number; backend?: SessionBackendSummary }>
   memoryStats: MemoryStats
   mcp: McpReport
-  live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean }
+  live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean; computer?: boolean }
+  computer?: ComputerStatus
   google: GoogleReport
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
@@ -872,6 +888,40 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
           </div>))}
           <p className="panel-note">Copying a profile carries the sign-in from the browser you use, so Milo then acts as you on those sites. Close that browser first — a profile in use cannot be copied.</p>
 
+          <h3 className="section-label" style={{ paddingInline: 0 }}>Computer Use</h3>
+          <label className="check-row"><input type="checkbox" checked={draft.computer?.enabled ?? false} onChange={(event) => update(['computer', 'enabled'], event.target.checked)} /> Enable Computer Use (restart to apply)</label>
+          <p className="panel-note">
+            Drive native desktop applications on this machine. In Ask and Auto modes, approval covers observing one window for the current turn and each action asks separately; Unrestricted mode runs both without prompting. Unavailable in Plan mode, routines, delegated work, and shared chats.
+          </p>
+          {data?.computer ? (
+            <div className="entry-row">
+              <div>
+                <div className="secret-name">{data.computer.summary}</div>
+                <div className="secret-state">
+                  {data.computer.available ? 'Host backend ready' : (data.computer.reason ?? 'Host backend unavailable')}
+                </div>
+                {data.computer.limitations.map((limitation) => (
+                  <div className="secret-state" key={limitation}>{limitation}</div>
+                ))}
+              </div>
+              <button
+                className="button"
+                type="button"
+                onClick={async () => {
+                  try {
+                    const next = await api<ComputerStatus>('computer-status')
+                    setData((current) => (current ? { ...current, computer: next } : current))
+                    setNotice({ text: `Computer Use status: ${next.summary}`, error: !next.available })
+                  } catch (error) {
+                    setNotice({ text: message(error), error: true })
+                  }
+                }}
+              >
+                Check status
+              </button>
+            </div>
+          ) : null}
+
           <h3 className="section-label" style={{ paddingInline: 0 }}>MCP servers</h3>
           {mcp?.error ? <p className="panel-note">{mcp.error}</p> : null}
           {!mcp
@@ -1043,7 +1093,7 @@ function summarize(id: string, draft: SettingsConfig, data: SettingsData, theme:
     case 'memory': return `${data.memoryStats.facts} fact${data.memoryStats.facts === 1 ? '' : 's'}`
     case 'gateways': return gateways.length === 0 ? 'Off' : gateways.join(', ')
     case 'web': return draft.web.enabled ? `${draft.web.host}:${draft.web.port}` : 'Off'
-    case 'tools': return `Search ${SEARCH_LABELS[draft.search?.provider ?? 'off']} · Browser ${draft.browser.enabled ? 'on' : 'off'}`
+    case 'tools': return `Search ${SEARCH_LABELS[draft.search?.provider ?? 'off']} · Browser ${draft.browser.enabled ? 'on' : 'off'} · Computer Use ${draft.computer?.enabled ? 'on' : 'off'}`
     case 'permissions': return PERMISSION_LABELS[draft.permissions.mode]
     case 'display': return theme === 'system' ? 'System theme' : theme === 'dark' ? 'Dark theme' : 'Light theme'
     case 'skills': return `${data.skills.length} installed`

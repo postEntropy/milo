@@ -11,7 +11,7 @@ import { toolBrand, toolParts, changeTotals } from '../../../src/gateways/tool-l
 import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
-import { attachmentUrl } from '../lib/api.js'
+import { attachmentUrl, authHeaders, toolPreviewUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
@@ -47,7 +47,7 @@ function Attachments({ items }: { items: FrameAttachment[] }) {
 /**
  * One call, as a line: the mark, the tool's name, and the one value worth showing.
  */
-function ToolLine({ tool }: { tool: ToolMark }) {
+function ToolLine({ tool, sessionId }: { tool: ToolMark; sessionId?: string }) {
   const [open, setOpen] = useState(false)
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
@@ -57,7 +57,8 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const totals = changeTotals(tool.change)
   const change = tool.change && tool.change.length > 0 ? tool.change : null
   const result = tool.result || null
-  const hasDetail = change !== null || result !== null || !!tool.input
+  const preview = tool.preview ?? null
+  const hasDetail = change !== null || result !== null || preview !== null || !!tool.input
   const canOpen = hasDetail || tool.state === 'running'
   const bot = extractToolBot(tool)
   const line = <code>
@@ -124,6 +125,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
       {open && !bot && tool.input && <ToolResult text={tool.input} />}
       {open && change && <ToolChange files={change} />}
       {open && !bot && !change && result && <ToolResult text={result} />}
+      {open && !bot && preview && <ToolPreview id={preview.id} callId={tool.callId} sessionId={sessionId} width={preview.width} height={preview.height} />}
       {open && !hasDetail && <div className="tool-result tool-running" role="status">{tool.state === 'running' ? 'Tool is still running.' : 'No output is available.'}</div>}
     </div>
   )
@@ -173,11 +175,84 @@ function ToolResult({ text }: { text: string }) {
 }
 
 /**
+ * Ephemeral desktop screenshot preview, fetched via authenticated `fetch()` only
+ * while its tool row is expanded. Collapsed rows mount nothing and issue zero requests.
+ */
+function ToolPreview({ id, callId, sessionId, width, height }: { id: string; callId?: string; sessionId?: string; width: number; height: number }) {
+  const [state, setState] = useState<
+    { kind: 'loading' }
+    | { kind: 'ready'; url: string }
+    | { kind: 'expired' }
+    | { kind: 'decode-error' }
+    | { kind: 'error' }
+  >({ kind: 'loading' })
+
+  useEffect(() => {
+    if (!callId || !sessionId) {
+      setState({ kind: 'error' })
+      return
+    }
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    setState({ kind: 'loading' })
+    fetch(toolPreviewUrl(id, callId, sessionId), {
+      headers: authHeaders(),
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 410 || response.status === 404) {
+          setState({ kind: 'expired' })
+          return
+        }
+        if (!response.ok) {
+          setState({ kind: 'error' })
+          return
+        }
+        const blob = await response.blob()
+        if (controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(blob)
+        setState({ kind: 'ready', url: objectUrl })
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setState({ kind: 'error' })
+      })
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [id, callId, sessionId])
+
+  return (
+    <div className="tool-result tool-preview">
+      {state.kind === 'ready' ? (
+        <img
+          className="tool-preview-img"
+          src={state.url}
+          width={width}
+          height={height}
+          alt="Desktop window preview"
+          onError={() => setState({ kind: 'decode-error' })}
+        />
+      ) : state.kind === 'expired' ? (
+        <div className="tool-preview-note" role="status">Preview expired.</div>
+      ) : state.kind === 'decode-error' ? (
+        <div className="tool-preview-note" role="status">Could not decode preview image.</div>
+      ) : state.kind === 'error' ? (
+        <div className="tool-preview-note" role="status">Preview unavailable.</div>
+      ) : (
+        <div className="tool-preview-note" role="status">Loading preview…</div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Calls made one after another are steps of one sequence, joined by a thread.
  */
-function ToolRun({ steps }: { steps: Array<{ tool: ToolMark; key: string }> }) {
+function ToolRun({ steps, sessionId }: { steps: Array<{ tool: ToolMark; key: string }>; sessionId?: string }) {
   return <div className="tool-run">
-    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} />)}
+    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} sessionId={sessionId} />)}
   </div>
 }
 
@@ -301,6 +376,7 @@ export const MessageList = memo(function MessageList({
   suggestions,
   hasIdeas,
   sessionBot,
+  sessionId,
   busy,
 }: {
   messages: ChatMessage[]
@@ -322,6 +398,7 @@ export const MessageList = memo(function MessageList({
   hasIdeas?: boolean
   /** The bot bound to this direct Session, when chatting directly with a Crew bot. */
   sessionBot?: BotAuthor | null
+  sessionId?: string
   busy?: boolean
 }) {
   if (messages.length === 0) {
@@ -399,6 +476,7 @@ export const MessageList = memo(function MessageList({
           key={message.id}
           message={message}
           thinking={thinking}
+          sessionId={sessionId}
           busy={Boolean(busy)}
           running={message.id === runningId}
           turn={messageTurns.get(message.id) ?? 1}
@@ -490,9 +568,10 @@ function RoutineCard({ routine, children }: { routine: RoutineDelivery; children
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onDismissPending, onRestorePending, onQuote, onSend, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onDismissPending, onRestorePending, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: ThinkingDisplay
+  sessionId?: string
   busy: boolean
   /** The message this turn is still writing; its answer is not ready to act on. */
   running: boolean
@@ -532,7 +611,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
       />
     ) : (
       toolRows(keyed).map((row) => {
-        if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
+        if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} sessionId={sessionId} />
         const { part, key } = row
         if (part.kind === 'reasoning') {
           // Every thought is on screen; the display only decides whether it
@@ -540,7 +619,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
         }
         if (part.kind === 'text') return <Markdown key={key} text={part.text} />
-        if (part.kind === 'tool') return <ToolRun key={key} steps={[{ tool: part.tool, key }]} />
+        if (part.kind === 'tool') return <ToolRun key={key} steps={[{ tool: part.tool, key }]} sessionId={sessionId} />
         if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
         if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
         return <TodoList key={key} items={part.items} />

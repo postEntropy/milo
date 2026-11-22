@@ -600,6 +600,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-content .tool-line.failed code::before { border-color: var(--danger); background: var(--danger); }
 .tool-call { display: flex; flex-direction: column; gap: var(--space-3); }
 .tool-result { padding-inline-start: 24px; }
+.tool-preview { margin-top: var(--space-2); }
+.tool-preview-img { display: block; max-width: 100%; height: auto; max-height: 360px; border-radius: var(--radius-md); background: var(--surface-warm); object-fit: contain; }
+.tool-preview-note { color: var(--muted); font-size: var(--text-xs); }
 .tool-running { color: var(--muted); font-size: var(--text-xs); }
 .tool-result-body { margin: 0; overflow: auto; max-height: 320px; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-5); color: var(--fg-2); font: 400 var(--text-xs)/1.6 var(--font-mono); white-space: pre; }
 .tool-change-count { display: flex; flex: none; gap: var(--space-2); font-variant-numeric: tabular-nums; }
@@ -737,9 +740,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes chat-notice-in { from { opacity: 0; transform: translate(-50%, -6px) scale(.97); } to { opacity: 1; transform: translateX(-50%); } }
 
 .composer-shell { width: 100%; background: var(--bg); padding: 6px 28px max(8px, env(safe-area-inset-bottom)); }
-/* The dock holds the composer and, floating just over it, the way back to the end
-   of the thread — centred, so it reads as the composer's own. */
+/* The dock holds the composer, any pending approval card above it, and the way back
+   to the end of the thread — outside the scrollable transcript and tool-call folds. */
 .composer-dock { position: relative; width: 100%; }
+.composer-approval { width: 100%; background: var(--bg); padding: var(--space-4) 28px 0; }
 /* Kept mounted and shown by class, so it can settle in and out rather than pop:
    the fade-out finishes before the button stops taking a pointer. */
 .jump-latest { position: absolute; z-index: 3; bottom: calc(100% + 8px); left: 50%; display: grid; width: var(--control-md); height: var(--control-md); place-items: center; border: 0; border-radius: 50%; background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-standard), visibility 0s linear var(--motion-base); }
@@ -920,7 +924,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .job-stop:hover { background: var(--border-soft); color: var(--fg); }
 .job-log { max-height: 160px; margin: var(--space-2) 0 0; border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-4) var(--space-6); overflow: auto; color: var(--muted); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.4; white-space: pre-wrap; }
 
-.approval { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); padding: var(--space-7) var(--space-8); box-shadow: var(--shadow); }
+.approval { width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); padding: var(--space-7) var(--space-8); box-shadow: var(--shadow); }
 .approval-head { display: flex; align-items: flex-start; gap: var(--space-6); }
 .approval-icon { display: grid; width: 34px; height: 34px; place-items: center; flex: none; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--warn); }
 .approval-title { min-width: 0; }
@@ -1424,6 +1428,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      same way it passes under the floating topbar — so the page shows behind Safari's
      own bar instead of a solid block. The box itself stays opaque (`.composer-box`). */
   .composer-shell { background: transparent; padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
+  .composer-approval { background: transparent; padding: var(--space-4) 18px 0; }
+  .approval { max-height: min(44dvh, 320px); overflow: auto; padding: var(--space-6); }
   .chat-view .notice { top: calc(var(--phone-top) + 46px); max-width: calc(100% - 32px); }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
 .crew-page .settings-inner { padding-top: calc(var(--phone-top) + var(--control-md) + var(--space-6)); }

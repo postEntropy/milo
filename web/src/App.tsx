@@ -643,6 +643,7 @@ export default function App() {
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
+      setPendingPermission(null)
       setSessionBot(frame.bot ?? null)
       // It is on the screen now, wherever it was opened from.
       markSeen(frame.sessionId)
@@ -914,7 +915,6 @@ export default function App() {
 
   const newSessionHere = useCallback((): Promise<boolean> => newChat(), [newChat])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
     const container = threadScroller()
     if (!container) return
@@ -936,7 +936,20 @@ export default function App() {
       followSend.current = false
       container.scrollTop = container.scrollHeight
     }
-  }, [messages, pendingPermission, threadScroller])
+  }, [messages, threadScroller])
+
+  useEffect(() => {
+    if (!pendingPermission) return
+    const delay = pendingPermission.expiresAt - Date.now()
+    if (delay <= 0) {
+      setPendingPermission((current) => current?.id === pendingPermission.id ? null : current)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setPendingPermission((current) => current?.id === pendingPermission.id ? null : current)
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [pendingPermission])
 
   /**
    * The thread stays pinned to its own end. The effect above only runs when the
@@ -1381,8 +1394,7 @@ export default function App() {
       const item = pendingMessagesRef.current.find((entry) => entry.id === id)
       if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
       try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
-    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} sessionBot={sessionBot} />
-    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => sendSocket({ type: 'control', action, id: pendingPermission.id })} /></article>}
+    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} sessionBot={sessionBot} sessionId={sessionId || undefined} />
   </>
 
   const workProject = sessionProject ?? projects?.[0] ?? null
@@ -1476,6 +1488,9 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
+            {pendingPermission && <div className="composer-approval">
+              <Permissions key={pendingPermission.id} request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={decide} />
+            </div>}
             <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} bots={sessionBot ? [] : crewBots} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(sessionProject) && backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={(text, intent, files, mentions) => send(text, intent, files, undefined, mentions)} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
           </div>
         </section>

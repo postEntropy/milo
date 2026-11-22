@@ -18,7 +18,7 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
     // Reasoning deltas do not end a wait — they are what fills it. A tool
     // call is an output of its own, and the wait before it was thinking.
     const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-    return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running', ...(event.input ? { input: event.input } : {}) } }], waitingSince: undefined, ...thoughtMsFor(waited, message) }
+    return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running', callId: event.id, ...(event.input ? { input: event.input } : {}) } }], waitingSince: undefined, ...thoughtMsFor(waited, message) }
   }
   if (event.type === 'tool-end') {
     // The result is in: the model is thinking again about what to do with it.
@@ -29,6 +29,7 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
     // sends it empty below the `full` level, so an empty one draws nothing.
     const result = event.result ? { result: event.result } : {}
     const change = event.change && event.change.length > 0 ? { change: event.change } : {}
+    const preview = event.preview ? { preview: event.preview, callId: event.id } : {}
     let running = -1
     for (let index = message.parts.length - 1; index >= 0; index -= 1) {
       const part = message.parts[index]
@@ -39,10 +40,10 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
       // failure worth saying, unless it is a tool that is not one any more.
       // Nothing goes wrong in silence.
       ? event.isError && (event.drawFailure ?? drawsToolFailure(event.name))
-        ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result, ...change } }]
+        ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result, ...change, ...preview } }]
         : message.parts
       : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
-        ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result, ...change } }
+        ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result, ...change, ...preview } }
         : part)
     return { ...message, parts, waitingSince: Date.now() }
   }
