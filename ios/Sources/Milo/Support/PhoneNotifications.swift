@@ -175,14 +175,160 @@ final class PhoneNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// A reply's words as much as a banner can carry: the lines flattened into one run,
-    /// and the tail cut at a word rather than through one.
+    /// A reply's words as much as a banner can carry: Markdown syntax stripped to plain
+    /// text, lines flattened into one run, and the tail cut at a word rather than through one.
     private static func snippet(_ words: String) -> String {
-        let flattened = words.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let plain = plainText(from: words)
+        let flattened = plain.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         guard flattened.count > replyWords else { return flattened }
         let head = flattened.prefix(replyWords)
         let cut = head.lastIndex(of: " ").map { String(head[..<$0]) } ?? String(head)
         return cut + "…"
+    }
+
+    /// Strips Markdown block and inline delimiters so system notification banners read as
+    /// plain prose rather than showing raw `**`, backticks, headings, or link URLs.
+    private static func plainText(from markdown: String) -> String {
+        let lines = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+
+        var output: [String] = []
+        var fenceChar: Character?
+        var fenceLength = 0
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if let openChar = fenceChar {
+                if let count = fencePrefixCount(trimmed),
+                   trimmed.first == openChar,
+                   count >= fenceLength,
+                   trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty {
+                    fenceChar = nil
+                    fenceLength = 0
+                } else if !trimmed.isEmpty {
+                    output.append(trimmed)
+                }
+                continue
+            }
+
+            if let count = fencePrefixCount(trimmed) {
+                fenceChar = trimmed.first
+                fenceLength = count
+                continue
+            }
+
+            if trimmed.isEmpty || isRuleLine(trimmed) || isTableSeparatorLine(trimmed) {
+                continue
+            }
+
+            let unwrapped = stripBlockPrefix(from: trimmed)
+            let cleaned = stripInlineMarkdown(unwrapped)
+            if !cleaned.isEmpty {
+                output.append(cleaned)
+            }
+        }
+
+        return output.joined(separator: " ")
+    }
+
+    private static func fencePrefixCount(_ trimmed: String) -> Int? {
+        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
+        let count = trimmed.prefix(while: { $0 == first }).count
+        guard count >= 3 else { return nil }
+        if first == "`", trimmed.dropFirst(count).contains("`") { return nil }
+        return count
+    }
+
+    private static func isRuleLine(_ trimmed: String) -> Bool {
+        let marks = trimmed.filter { $0 != " " }
+        guard marks.count >= 3 else { return false }
+        return marks.allSatisfy { $0 == "-" } || marks.allSatisfy { $0 == "*" } || marks.allSatisfy { $0 == "_" }
+    }
+
+    private static func isTableSeparatorLine(_ trimmed: String) -> Bool {
+        guard trimmed.contains("|") else { return false }
+        var cells = trimmed.components(separatedBy: "|")
+        if cells.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { cells.removeFirst() }
+        if cells.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { cells.removeLast() }
+        let normalized = cells.map { $0.trimmingCharacters(in: .whitespaces) }
+        guard !normalized.isEmpty else { return false }
+        return normalized.allSatisfy { cell in
+            !cell.isEmpty && cell.contains("-") && cell.allSatisfy { $0 == "-" || $0 == ":" }
+        }
+    }
+
+    private static func stripBlockPrefix(from line: String) -> String {
+        var current = line
+
+        // Strip repeated blockquote markers (`> `).
+        while current.hasPrefix(">") {
+            current = String(current.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+
+        // Strip ATX heading markers (`### Title ##`).
+        if current.hasPrefix("#") {
+            let afterHashes = current.drop(while: { $0 == "#" })
+            if afterHashes.isEmpty || afterHashes.first?.isWhitespace == true {
+                var heading = afterHashes.trimmingCharacters(in: .whitespaces)
+                while heading.hasSuffix("#") {
+                    let withoutLast = heading.dropLast()
+                    if withoutLast.isEmpty || withoutLast.last?.isWhitespace == true {
+                        heading = withoutLast.trimmingCharacters(in: .whitespaces)
+                    } else {
+                        break
+                    }
+                }
+                return heading
+            }
+        }
+
+        // Strip unordered list bullets (`- `, `* `, `+ `) and optional task checkboxes.
+        for marker in ["- ", "* ", "+ "] where current.hasPrefix(marker) {
+            current = String(current.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
+            for box in ["[x] ", "[X] ", "[ ] "] where current.hasPrefix(box) {
+                current = String(current.dropFirst(box.count)).trimmingCharacters(in: .whitespaces)
+                break
+            }
+            return current
+        }
+
+        // Flatten pipe table rows (`| A | B |` -> `A B`).
+        if current.hasPrefix("|") || current.hasSuffix("|") {
+            let cells = current
+                .components(separatedBy: "|")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return cells.joined(separator: " ")
+        }
+
+        return current
+    }
+
+    private static func stripInlineMarkdown(_ line: String) -> String {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        var plain: String
+        if let parsed = try? AttributedString(markdown: line, options: options) {
+            plain = String(parsed.characters)
+        } else {
+            plain = line
+        }
+
+        // Clean GFM strikethrough (`~~text~~`), any markdown links/emphasis left unparsed by
+        // CommonMark flanking rules (for example around curly quotes), and stray backticks.
+        plain = plain.replacingOccurrences(of: #"!\[([^\]]*)\]\([^\s)]+\)"#, with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: #"\[([^\]]+)\]\([^\s)]+\)"#, with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: #"~~([^~]+)~~"#, with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: #"__([^_]+)__"#, with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: "`+([^`]+)`+", with: "$1", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: "**", with: "")
+        plain = plain.replacingOccurrences(of: "`", with: "")
+        return plain.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - The system's own callbacks
