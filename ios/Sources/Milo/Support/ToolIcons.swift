@@ -125,9 +125,7 @@ enum ToolIcons {
         "task": "sparkles",
         "crew": "sparkles",
         "delegated_work": "clock.badge.checkmark",
-        // A code mark rather than Apple's colored Terminal app icon, which stands out
-        // against the monochrome symbols in the tool line.
-        "shell_command": "chevron.left.forwardslash.chevron.right",
+        "shell_command": "terminal",
         "browser_open": "safari",
         "browser_snapshot": "eye",
         "browser_screenshot": "camera",

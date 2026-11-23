@@ -3163,6 +3163,12 @@ final class AppModel {
                 message.waiting = false
                 message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running", input: input)))
             }
+            if name == "task" {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    await refreshCrewBots()
+                }
+            }
         case .toolEnd(let id, let name, let isError, let drawFailure, let result, let change, let preview):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
@@ -3185,6 +3191,9 @@ final class AppModel {
                     tool.callId = id
                 }
                 parts[index] = .tool(tool)
+            }
+            if name == "task" {
+                Task { await refreshCrewBots() }
             }
             // The result is in, so the model is thinking again about what to do with it:
             // the wait line comes back, which is the browser's own reading of this moment.

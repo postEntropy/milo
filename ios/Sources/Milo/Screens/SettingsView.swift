@@ -65,6 +65,9 @@ struct SettingsView: View {
                             onOpenSession?()
                         })
                     }
+                    category("MCP", icon: "puzzlepiece.extension") {
+                        McpSettingsView()
+                    }
                     category("Permissions", icon: "shield") {
                         PermissionsSettingsView()
                     }
@@ -282,11 +285,6 @@ private struct ToolsSettingsView: View {
                 } label: {
                     LabeledContent("Computer Use", value: model.computerEnabled ? "On" : "Off")
                 }
-                NavigationLink {
-                    McpSettingsView()
-                } label: {
-                    LabeledContent("MCP servers", value: mcpSummary)
-                }
             }
             SettingsErrorSection()
         }
@@ -300,11 +298,6 @@ private struct ToolsSettingsView: View {
         case "wanted": return "Not connected"
         default: return model.googleEnabled ? "On" : "Off"
         }
-    }
-
-    private var mcpSummary: String {
-        let count = model.mcpReport?.servers.count ?? 0
-        return count == 0 ? "None" : "\(count)"
     }
 
     private var searchProvider: Binding<String> {
@@ -1199,7 +1192,7 @@ private struct McpSettingsView: View {
             SetupJobSection()
             SettingsErrorSection()
         }
-        .navigationTitle("MCP servers")
+        .navigationTitle("MCP")
         .navigationBarTitleDisplayMode(.inline)
     }
 

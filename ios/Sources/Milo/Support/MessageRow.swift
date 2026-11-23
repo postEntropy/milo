@@ -199,18 +199,21 @@ struct MessageRow: View, Equatable {
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                 if head, let bot = message.bot {
+                    let liveBot = model.crewBots.first(where: { $0.id == bot.id })
+                    let displayName = liveBot?.name ?? bot.name
+                    let displayHandle = liveBot?.handle ?? bot.handle
                     HStack(spacing: MiloTheme.Space.two) {
                         CrewBotAvatar(
-                            avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
+                            avatar: CrewAvatarModel.resolved(wire: liveBot?.avatar ?? bot.avatar, id: bot.id, name: displayName),
                             state: message.streaming ? "running" : nil,
                             size: 32,
                             animated: message.streaming
                         )
-                        Text(bot.name)
+                        Text(displayName)
                             .font(MiloTheme.Text.small.weight(.semibold))
                             .foregroundStyle(MiloTheme.foreground)
                             .lineLimit(1)
-                        if let handle = bot.handle, !handle.isEmpty {
+                        if let handle = displayHandle, !handle.isEmpty {
                             Text("@\(handle)")
                                 .font(MiloTheme.Text.meta.monospaced())
                                 .foregroundStyle(MiloTheme.muted)
@@ -814,10 +817,16 @@ struct ToolRow: View {
                 .accessibilityLabel(bot != nil ? detailLabel : (showingResult ? detailHiddenLabel : detailLabel))
 
                 if bot == nil && showingResult {
-                    if let change = tool.change, !change.isEmpty {
-                        changeBody(change)
-                    } else {
-                        toolDetailBody(input: tool.input, output: tool.result)
+                    Group {
+                        if let change = tool.change, !change.isEmpty {
+                            changeBody(change)
+                        } else {
+                            toolDetailBody(input: tool.input, output: tool.result)
+                        }
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.22)) { showingResult = false }
                     }
                     if let preview = tool.preview {
                         ToolPreviewView(preview: preview, callId: tool.callId)
@@ -933,17 +942,19 @@ struct ToolRow: View {
                 Glare(text: wholeLine, font: MiloTheme.Text.body)
                     .lineLimit(1)
             } else {
-                Text(name)
-                    .font(MiloTheme.Text.body)
-                    .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if !value.isEmpty {
-                    Text(value)
+                HStack(spacing: 0) {
+                    Text(value.isEmpty ? name : "\(name) ")
                         .font(MiloTheme.Text.body)
                         .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
                         .lineLimit(1)
-                        .truncationMode(value.contains("/") ? .middle : .tail)
+                        .truncationMode(.middle)
+                    if !value.isEmpty {
+                        Text(value)
+                            .font(MiloTheme.Text.body)
+                            .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
+                            .lineLimit(1)
+                            .truncationMode(value.contains("/") ? .middle : .tail)
+                    }
                 }
                 // How much the call moved, in the same two tones the Work screen counts a
                 // folder's changes with: read on the line, before the fold is opened.
@@ -976,20 +987,20 @@ struct ToolRow: View {
                         if files.count > 1 {
                             Text(file.path + (file.created == true ? " (new)" : file.deleted == true ? " (deleted)" : ""))
                                 .font(MiloTheme.Text.meta)
-                                .foregroundStyle(MiloTheme.muted)
+                                .foregroundStyle(MiloTheme.mutedStrong)
                         }
                         ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
                             HStack(spacing: MiloTheme.Space.two) {
                                 Text(line.old.map(String.init) ?? "")
                                     .frame(width: 26, alignment: .trailing)
-                                    .foregroundStyle(MiloTheme.muted)
+                                    .foregroundStyle(MiloTheme.mutedStrong)
                                 Text(line.new.map(String.init) ?? "")
                                     .frame(width: 26, alignment: .trailing)
-                                    .foregroundStyle(MiloTheme.muted)
+                                    .foregroundStyle(MiloTheme.mutedStrong)
                                 Text(line.kind == "add" ? "+" : line.kind == "remove" ? "−" : " ")
                                     .foregroundStyle(line.kind == "add"
                                         ? MiloTheme.success
-                                        : line.kind == "remove" ? MiloTheme.danger : MiloTheme.muted)
+                                        : line.kind == "remove" ? MiloTheme.danger : MiloTheme.mutedStrong)
                                 Text(line.text.isEmpty ? " " : line.text)
                                     .foregroundStyle(MiloTheme.foreground2)
                             }
@@ -1000,7 +1011,7 @@ struct ToolRow: View {
                                 : line.kind == "remove" ? MiloTheme.danger.opacity(0.15) : Color.clear)
                         }
                         if file.truncated == true {
-                            Text("…").font(MiloTheme.Text.mono).foregroundStyle(MiloTheme.muted)
+                            Text("…").font(MiloTheme.Text.mono).foregroundStyle(MiloTheme.mutedStrong)
                         }
                     }
                 }
@@ -1008,7 +1019,7 @@ struct ToolRow: View {
             .padding(MiloTheme.Space.three)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .miloGlassCard(radius: MiloTheme.Radius.md)
         .marksSidewaysDrag()
         .padding(.leading, 22)
     }
@@ -1023,21 +1034,21 @@ struct ToolRow: View {
             }
             if let output, !output.isEmpty {
                 Text(output)
-                    .foregroundStyle(MiloTheme.muted)
+                    .foregroundStyle(MiloTheme.mutedStrong)
                     .fixedSize(horizontal: false, vertical: true)
             } else if running {
                 Text("Tool is still running.")
-                    .foregroundStyle(MiloTheme.muted)
+                    .foregroundStyle(MiloTheme.mutedStrong)
             } else if input == nil || input?.isEmpty == true {
                 Text("No output is available.")
-                    .foregroundStyle(MiloTheme.muted)
+                    .foregroundStyle(MiloTheme.mutedStrong)
             }
         }
         .font(MiloTheme.Text.mono)
         .textSelection(.enabled)
         .padding(MiloTheme.Space.three)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .miloGlassCard(radius: MiloTheme.Radius.md)
         .marksSidewaysDrag()
     }
 
@@ -1055,8 +1066,28 @@ struct ToolRow: View {
         return nil
     }
 
+    private func resolveTaskBot(id explicitId: String?, name rawName: String) -> (avatar: CrewAvatarModel, name: String) {
+        let trimmedId = explicitId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = (trimmedId?.isEmpty == false) ? trimmedId : nil
+        if let id, let matched = model.crewBots.first(where: { $0.id == id }) {
+            return (CrewAvatarModel.resolved(wire: matched.avatar, id: matched.id, name: matched.name), matched.name)
+        }
+        let target = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedHandle = target.hasPrefix("@") ? String(target.drop(while: { $0 == "@" })) : target
+        if let matched = model.crewBots.first(where: {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == target
+        }) ?? model.crewBots.first(where: {
+            guard let handle = $0.handle else { return false }
+            return handle.lowercased() == normalizedHandle
+        }) {
+            return (CrewAvatarModel.resolved(wire: matched.avatar, id: matched.id, name: matched.name), matched.name)
+        }
+        return (.fromSeed(id: id ?? rawName, name: rawName), rawName)
+    }
+
     private var taskBotInfo: (avatar: CrewAvatarModel, name: String)? {
         guard tool.name == "task" else { return nil }
+        let inputBotId = readInputField("botId")
         if let result = tool.result, result.hasPrefix("Crew bot ") {
             let rest = String(result.dropFirst(9))
             let header = rest.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? rest
@@ -1069,21 +1100,19 @@ struct ToolRow: View {
                        close == prefix.index(before: prefix.endIndex) {
                         let botName = String(prefix[..<open]).trimmingCharacters(in: .whitespaces)
                         let botId = String(prefix[prefix.index(after: open)..<close]).trimmingCharacters(in: .whitespaces)
-                        if !botName.isEmpty { return (.fromSeed(id: botId.isEmpty ? botName : botId, name: botName), botName) }
+                        if !botName.isEmpty { return resolveTaskBot(id: botId.isEmpty ? inputBotId : botId, name: botName) }
                     }
                     let botName = prefix.trimmingCharacters(in: .whitespaces)
-                    if !botName.isEmpty { return (.fromSeed(id: readInputField("botId") ?? botName, name: botName), botName) }
+                    if !botName.isEmpty { return resolveTaskBot(id: inputBotId, name: botName) }
                 }
             }
         }
-        let inputName = readInputField("name")
-        let inputBotId = readInputField("botId")
-        if let inputName {
-            return (.fromSeed(id: inputBotId ?? inputName, name: inputName), inputName)
+        if let inputName = readInputField("name") {
+            return resolveTaskBot(id: inputBotId, name: inputName)
         }
         let stripped = tool.text.replacingOccurrences(of: "^Task\\s+", with: "", options: .regularExpression)
         let botName = stripped.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return botName.isEmpty ? nil : (.fromSeed(id: inputBotId ?? botName, name: botName), botName)
+        return botName.isEmpty ? nil : resolveTaskBot(id: inputBotId, name: botName)
     }
 
     private func taskSubtitle(botName: String) -> String {
@@ -1422,14 +1451,18 @@ struct VerificationRow: View {
 
 struct TodoRow: View {
     let items: [TodoItem]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        let animate = !reduceMotion && scenePhase == .active
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
                     Image(systemName: symbol(item.status))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(mark(item.status))
+                        .symbolEffect(.rotate, options: .repeating, isActive: animate && item.status == "in_progress")
                     Text(item.content)
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(item.status == "completed" ? MiloTheme.mutedStrong : MiloTheme.foreground)

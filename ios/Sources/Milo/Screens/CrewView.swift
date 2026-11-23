@@ -108,8 +108,14 @@ private struct CrewBot: Decodable, Identifiable {
     let handle: String?
     let instructions: String?
     let createdAt: Double?
+    let ephemeral: Bool?
+    let archivedAt: Double?
     let avatar: CrewAvatarModel?
     let assignments: [CrewAssignment]
+
+    var isArchived: Bool {
+        archivedAt != nil
+    }
 
     var resolvedAvatar: CrewAvatarModel {
         avatar ?? .fromSeed(id: id, name: name)
@@ -857,6 +863,9 @@ struct CrewView: View {
                                 tone: MiloTheme.accent
                             )
                         } else {
+                            if bot.isArchived {
+                                statusBadge("Archived", tone: MiloTheme.muted)
+                            }
                             Text(botSummaryLine(bot))
                                 .font(MiloTheme.Text.small)
                                 .foregroundStyle(MiloTheme.muted)
@@ -864,18 +873,33 @@ struct CrewView: View {
                         }
                     }
 
-                    Button {
-                        onChatWithBot(bot.id)
-                    } label: {
-                        Label("Chat with bot", systemImage: "bubble.left.and.text.bubble.right.fill")
-                            .font(MiloTheme.Text.small.weight(.semibold))
-                            .foregroundStyle(MiloTheme.accentOn)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 44)
-                            .background(MiloTheme.accent, in: Capsule())
+                    if bot.isArchived {
+                        Button {
+                            Task { await keep(bot.id) }
+                        } label: {
+                            Label("Keep in Crew", systemImage: "pin.fill")
+                                .font(MiloTheme.Text.small.weight(.semibold))
+                                .foregroundStyle(MiloTheme.accentOn)
+                                .frame(maxWidth: .infinity)
+                                .frame(minHeight: 44)
+                                .background(MiloTheme.accent, in: Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                        .disabled(busy)
+                    } else {
+                        Button {
+                            onChatWithBot(bot.id)
+                        } label: {
+                            Label("Chat with bot", systemImage: "bubble.left.and.text.bubble.right.fill")
+                                .font(MiloTheme.Text.small.weight(.semibold))
+                                .foregroundStyle(MiloTheme.accentOn)
+                                .frame(maxWidth: .infinity)
+                                .frame(minHeight: 44)
+                                .background(MiloTheme.accent, in: Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                        .disabled(busy)
                     }
-                    .buttonStyle(PressableStyle())
-                    .disabled(busy)
 
                     HStack(spacing: MiloTheme.Space.two) {
                         profileActionPill("Profile", symbol: "doc.text") {
@@ -1549,7 +1573,7 @@ struct CrewView: View {
         refreshGeneration += 1
         let mine = refreshGeneration
         do {
-            async let nextBots = MiloApi.call("crew", account: account, as: [CrewBot].self)
+            async let nextBots = MiloApi.call("crew", ["includeArchived": true], account: account, as: [CrewBot].self)
             async let nextWork = MiloApi.call("delegated-work", account: account, as: [DelegatedWork].self)
             let (fetchedBots, fetchedWork) = try await (nextBots, nextWork)
             guard mine == refreshGeneration else { return }
@@ -1661,6 +1685,17 @@ struct CrewView: View {
         busy = true; defer { busy = false }
         do { _ = try await MiloApi.call("crew-guide", ["id": id, "text": text], account: account, as: MiloApi.Ack.self); guidanceDraft = ""; await refresh() }
         catch { self.error = error.localizedDescription }
+    }
+
+    @MainActor private func keep(_ id: String) async {
+        busy = true; defer { busy = false }
+        do {
+            let updated = try await MiloApi.call("crew-keep", ["id": id], account: account, as: CrewBot.self)
+            refreshGeneration += 1
+            bots = bots.map { $0.id == updated.id ? updated : $0 }
+            error = nil
+            await model.refreshCrewBots()
+        } catch { self.error = error.localizedDescription }
     }
 
     @MainActor private func remove(_ id: String) async {
@@ -2187,21 +2222,33 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
     @ViewBuilder let workRow: (DelegatedWork) -> WorkRowView
 
     @Environment(AppModel.self) private var model
+    @State private var showArchived = false
+
+    private var activeBots: [CrewBot] {
+        bots.filter { !$0.isArchived }
+    }
+
+    private var archivedBots: [CrewBot] {
+        bots.filter { $0.isArchived }
+    }
 
     private var activeBotsCount: Int {
-        bots.filter { $0.currentState == "running" }.count
+        activeBots.filter { $0.currentState == "running" }.count
     }
 
     private var totalMissionsCount: Int {
-        bots.reduce(0) { $0 + $1.assignments.count }
+        activeBots.reduce(0) { $0 + $1.assignments.count }
     }
 
     private var summaryLine: String {
         var parts: [String] = []
         if activeBotsCount > 0 { parts.append("\(activeBotsCount) working") }
-        parts.append("\(bots.count) \(bots.count == 1 ? "bot" : "bots")")
+        parts.append("\(activeBots.count) \(activeBots.count == 1 ? "bot" : "bots")")
         if totalMissionsCount > 0 {
             parts.append("\(totalMissionsCount) \(totalMissionsCount == 1 ? "mission" : "missions")")
+        }
+        if !archivedBots.isEmpty {
+            parts.append("\(archivedBots.count) archived")
         }
         if !work.isEmpty {
             parts.append("\(work.count) delegated")
@@ -2225,8 +2272,8 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
 
                         Spacer()
 
-                        if !bots.isEmpty {
-                            CrewAvatarStack(bots: bots)
+                        if !activeBots.isEmpty {
+                            CrewAvatarStack(bots: activeBots)
                         }
                     }
 
@@ -2268,17 +2315,32 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .miloGlassCard(radius: MiloTheme.Radius.xl)
                 } else {
-                    if !bots.isEmpty {
+                    if !activeBots.isEmpty {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three + 2) {
                             Text("Bots")
                                 .font(MiloTheme.Text.title)
                                 .foregroundStyle(MiloTheme.foreground)
 
                             VStack(spacing: MiloTheme.Space.three + 2) {
-                                ForEach(bots) { bot in
+                                ForEach(activeBots) { bot in
                                     botCard(bot)
                                 }
                             }
+                        }
+                    }
+
+                    if !archivedBots.isEmpty {
+                        DisclosureGroup(isExpanded: $showArchived) {
+                            VStack(spacing: MiloTheme.Space.three + 2) {
+                                ForEach(archivedBots) { bot in
+                                    botCard(bot)
+                                }
+                            }
+                            .padding(.top, MiloTheme.Space.two)
+                        } label: {
+                            Text("Archived task bots (\(archivedBots.count))")
+                                .font(MiloTheme.Text.small.weight(.semibold))
+                                .foregroundStyle(MiloTheme.muted)
                         }
                     }
 

@@ -15,7 +15,7 @@ struct WaitLine: View {
 
     var body: some View {
         HStack(spacing: MiloTheme.Space.two) {
-            Image(systemName: "sparkles")
+            Image(systemName: "lightbulb.max.fill")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MiloTheme.muted)
             Glare(text: label, font: MiloTheme.Text.base)

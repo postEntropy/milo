@@ -654,12 +654,7 @@ struct CodeBlock: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        // The hairline the browser draws around the same block: content chrome, not a control.
-        .overlay(
-            RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-                .stroke(MiloTheme.borderSoft, lineWidth: 1)
-        )
+        .miloGlassCard(radius: MiloTheme.Radius.md)
         .marksSidewaysDrag()
         // The tap that says the words are on the clipboard. It fires on the copy itself and not
         // again when the checkmark lets go two seconds later, which a bare flag would do.
@@ -673,7 +668,7 @@ struct CodeBlock: View {
         HStack(spacing: 0) {
             Text(name)
                 .font(MiloTheme.Text.meta)
-                .foregroundStyle(MiloTheme.muted)
+                .foregroundStyle(MiloTheme.mutedStrong)
             Spacer(minLength: 0)
             copyControl
         }
@@ -694,11 +689,12 @@ struct CodeBlock: View {
         } label: {
             Image(systemName: copied ? "checkmark" : "doc.on.doc")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MiloTheme.muted)
+                .foregroundStyle(MiloTheme.mutedStrong)
                 .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+                .background(Circle().fill(MiloTheme.foreground.opacity(0.08)))
+                .contentShape(Circle())
         }
-        .glassEffect(.regular.interactive(), in: Circle())
+        .buttonStyle(PressableStyle())
         .accessibilityLabel(copied ? "Copied" : "Copy the code")
     }
 }

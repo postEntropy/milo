@@ -656,13 +656,14 @@ struct Composer: View {
             .background(Circle().fill(MiloTheme.accent))
     }
 
-    /// A quiet fill — the accent stays on the one thing to press when nothing runs.
+    /// A quiet translucent fill — blends with the composer's glass without cutting an
+    /// opaque disc out of it, keeping the accent on the idle send.
     private var stopGlyph: some View {
         Image(systemName: "stop.fill")
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(MiloTheme.foreground)
             .frame(width: 36, height: 36)
-            .background(Circle().fill(MiloTheme.surface))
+            .background(Circle().fill(MiloTheme.foreground.opacity(0.14)))
     }
 }
 
