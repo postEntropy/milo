@@ -805,6 +805,12 @@ export default function App() {
         if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
         return
       }
+      if (event.type === 'tool-start' && event.name === 'task') {
+        window.setTimeout(() => { void refreshCrewBots() }, 250)
+      }
+      if (event.type === 'tool-end' && event.name === 'task') {
+        void refreshCrewBots()
+      }
       setMessages((current) => current.map((message) => message.id === targetId
         ? applyEvent(message, event, frame.says)
         : message))
@@ -881,7 +887,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions, markSeen, markSeenOnChat, changePending, refreshProjects])
+  }, [refreshSessions, markSeen, markSeenOnChat, changePending, refreshProjects, refreshCrewBots])
 
   const newChat = useCallback(async (
     context: NewSessionContext = {},
@@ -1423,7 +1429,7 @@ export default function App() {
       const item = pendingMessagesRef.current.find((entry) => entry.id === id)
       if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
       try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
-    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} sessionBot={sessionBot} sessionId={sessionId || undefined} />
+    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} sessionBot={sessionBot} crewBots={crewBots} sessionId={sessionId || undefined} />
   </>
 
   const workProject = sessionProject ?? projects?.[0] ?? null

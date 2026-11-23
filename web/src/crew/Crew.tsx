@@ -89,6 +89,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
   const [error, setError] = useState<string | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const generation = useRef(0)
 
   const openBot = (entry: CrewBot) => {
@@ -123,7 +124,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const mine = ++generation.current
     const [botsResult, workResult] = await Promise.allSettled([
-      api<CrewBot[]>('crew', undefined, signal),
+      api<CrewBot[]>('crew', { includeArchived: true }, signal),
       api<WorkView[]>('delegated-work', undefined, signal),
     ])
     if (mine !== generation.current) return
@@ -179,7 +180,34 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
   const botAvatar = bot ? botAvatarOf(bot) : null
   const botState = bot?.assignments.at(-1)?.state
   const botRunning = bot?.assignments.some((entry) => entry.state === 'running') ?? false
+  const activeBots = bots?.filter((entry) => entry.archivedAt === undefined) ?? []
+  const archivedBots = bots?.filter((entry) => entry.archivedAt !== undefined) ?? []
   const job = work?.find((entry) => entry.id === selectedWork)
+
+  const renderBotCard = (entry: CrewBot) => {
+    const last = entry.assignments.at(-1)
+    const avatar = botAvatarOf(entry)
+    return <button className={`crew-bot-card ${last?.state === 'running' ? 'is-running' : ''} ${entry.archivedAt !== undefined ? 'is-archived' : ''}`} type="button" key={entry.id} onClick={() => openBot(entry)}>
+      <div className="crew-bot-card-top">
+        <span className="crew-bot-stage" style={{ '--bot-tone': botToneOf(avatar) } as CSSProperties}>
+          <BotAvatar avatar={avatar} state={last?.state} size={62} />
+        </span>
+        <div className="crew-bot-card-identity">
+          <div className="crew-card-head">
+            <span className="routine-row-name">{entry.name}</span>
+            {last?.state && <span className={`crew-badge ${last.state}`}>{last.state}</span>}
+          </div>
+          <span className="crew-bot-card-model">
+            {entry.handle && entry.archivedAt === undefined ? `@${entry.handle} · ` : ''}
+            {last?.provider ? `${last.provider} · ` : ''}{last?.model ?? SHAPE_LABELS[avatar.shape]}
+          </span>
+        </div>
+      </div>
+      {entry.instructions && !last?.mission && <p className="crew-instructions-preview">{entry.instructions}</p>}
+      {last?.mission && <p className="crew-bot-card-mission">{last.mission}</p>}
+      {last?.report && last.state !== 'running' && <p className="crew-bot-card-report">{last.report}</p>}
+    </button>
+  }
 
   async function createBot() {
     if (!newName.trim()) return
@@ -246,6 +274,18 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
     if (!bot || !guidance.trim()) return
     setSaving(true)
     try { await api('crew-guide', { id: bot.id, text: guidance }); setGuidance(''); await refresh() }
+    catch (cause) { setError(message(cause)) }
+    finally { setSaving(false) }
+  }
+  async function keepBot() {
+    if (!bot) return
+    setSaving(true)
+    try {
+      const updated = await api<CrewBot>('crew-keep', { id: bot.id })
+      generation.current += 1
+      setBots((current) => current?.map((item) => (item.id === updated.id ? updated : item)) ?? current)
+      setError(null)
+    }
     catch (cause) { setError(message(cause)) }
     finally { setSaving(false) }
   }
@@ -374,7 +414,10 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         <div className="crew-bot-hero-main">
           <div className="crew-card-head">
             <h3>{bot.name}</h3>
-            {botState && <span className={`crew-badge ${botState}`}>{botState}</span>}
+            <div className="crew-card-meta-group">
+              {bot.archivedAt !== undefined && <span className="crew-badge">archived</span>}
+              {botState && <span className={`crew-badge ${botState}`}>{botState}</span>}
+            </div>
           </div>
           <span className="routine-row-meta">
             {bot.handle ? <><span className="crew-handle">@{bot.handle}</span> · </> : null}
@@ -382,7 +425,9 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
           </span>
         </div>
         <div className="crew-hero-actions">
-          {onChatWithBot && <button className="button primary" type="button" disabled={saving} onClick={() => onChatWithBot(bot.id)}>Chat with bot</button>}
+          {bot.archivedAt !== undefined
+            ? <button className="button primary" type="button" disabled={saving} onClick={() => void keepBot()}>Keep in Crew</button>
+            : onChatWithBot && <button className="button primary" type="button" disabled={saving} onClick={() => onChatWithBot(bot.id)}>Chat with bot</button>}
           <button className="button" type="button" disabled={saving} onClick={() => void updateAvatar({ shuffle: true })}>Shuffle avatar</button>
           <button className="button" type="button" onClick={() => setCustomizing((current) => !current)}>{customizing ? 'Done' : 'Customize'}</button>
           <button
@@ -486,33 +531,22 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
     </div> : <div className="crew-toolbar">
       <button className="button primary" type="button" onClick={openCreate}><Icon name="plus" size={15} /> New bot</button>
     </div>}
-    {bots.length > 0 && <>
+    {activeBots.length > 0 && <>
       <h3 className="crew-section-title">Bots</h3>
-      <div className="crew-grid">{bots.map((entry) => {
-        const last = entry.assignments.at(-1)
-        const avatar = botAvatarOf(entry)
-        return <button className={`crew-bot-card ${last?.state === 'running' ? 'is-running' : ''}`} type="button" key={entry.id} onClick={() => openBot(entry)}>
-          <div className="crew-bot-card-top">
-            <span className="crew-bot-stage" style={{ '--bot-tone': botToneOf(avatar) } as CSSProperties}>
-              <BotAvatar avatar={avatar} state={last?.state} size={62} />
-            </span>
-            <div className="crew-bot-card-identity">
-              <div className="crew-card-head">
-                <span className="routine-row-name">{entry.name}</span>
-                {last?.state && <span className={`crew-badge ${last.state}`}>{last.state}</span>}
-              </div>
-              <span className="crew-bot-card-model">
-                {entry.handle ? `@${entry.handle} · ` : ''}
-                {last?.provider ? `${last.provider} · ` : ''}{last?.model ?? SHAPE_LABELS[avatar.shape]}
-              </span>
-            </div>
-          </div>
-          {entry.instructions && !last?.mission && <p className="crew-instructions-preview">{entry.instructions}</p>}
-          {last?.mission && <p className="crew-bot-card-mission">{last.mission}</p>}
-          {last?.report && last.state !== 'running' && <p className="crew-bot-card-report">{last.report}</p>}
-        </button>
-      })}</div>
+      <div className="crew-grid">{activeBots.map(renderBotCard)}</div>
     </>}
+    {archivedBots.length > 0 && <div className="crew-archived-section">
+      <button
+        className="crew-archived-toggle"
+        type="button"
+        aria-expanded={showArchived}
+        onClick={() => setShowArchived((current) => !current)}
+      >
+        <Icon name="chevron" size={14} />
+        <span>Archived task bots ({archivedBots.length})</span>
+      </button>
+      {showArchived && <div className="crew-grid">{archivedBots.map(renderBotCard)}</div>}
+    </div>}
     {work.length > 0 && <>
       <h3 className="crew-section-title">Delegated work</h3>
       <div className="crew-work-grid">{work.map((entry) => {
