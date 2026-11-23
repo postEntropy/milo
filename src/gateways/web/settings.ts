@@ -169,7 +169,7 @@ export class WebSettings {
       case 'routines': return this.routines.listRoutines()
       case 'crew': {
         if (!this.runtime.crew) throw new Error('Crew is not available.')
-        return this.runtime.crew.list()
+        return this.runtime.crew.list({ includeArchived: body.includeArchived === true })
       }
       case 'crew-create': {
         if (typeof body.name !== 'string' || !body.name.trim()) throw new Error('Enter a bot name.')
@@ -252,6 +252,14 @@ export class WebSettings {
         await this.runtime.crew.guide(body.id, body.text)
         this.files?.crewChanged?.()
         return { queued: true }
+      }
+      case 'crew-keep': {
+        if (typeof body.id !== 'string' || !body.id.trim()) throw new Error('Enter a bot id.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        const bot = await this.runtime.crew.keep(body.id)
+        this.files?.crewChanged?.()
+        this.files?.sessionsChanged?.()
+        return bot
       }
       case 'crew-remove': {
         if (typeof body.id !== 'string' || !body.id.trim()) throw new Error('Enter a bot id.')

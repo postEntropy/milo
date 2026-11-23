@@ -199,7 +199,7 @@ describe('delegated work', () => {
     await scheduler.start(); await scheduler.settle(); scheduler.stop()
     const run = store.list().find((item) => item.id === work.id)!.runs[0]!
     expect(run).toMatchObject({ result: 'completed', report: 'Final report' })
-    expect(crew.list()).toMatchObject([{ name: 'Scout', assignments: [{ sessionId: run.sessionId, report: 'Bot report', state: 'completed' }] }])
+    expect(crew.list({ includeArchived: true })).toMatchObject([{ name: 'Scout', assignments: [{ sessionId: run.sessionId, report: 'Bot report', state: 'completed' }] }])
     expect(errors).toEqual([])
     await runtime.close()
   })

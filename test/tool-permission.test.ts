@@ -157,7 +157,8 @@ describe('tool permission gating', () => {
     const dir = mkdtempSync(join(tmpdir(), 'milo-crew-perm-'))
     try {
       const crew = new CrewStore(join(dir, 'crew.json'))
-      const first = await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
+      const scout = await crew.create({ name: 'Scout' })
+      const first = await crew.start({ botId: scout.id, name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
       await crew.finish(first.bot.id, first.assignment.id, 'completed', 'Done')
 
       const invokeTool = async (
@@ -288,16 +289,16 @@ describe('tool permission gating', () => {
       expect(prompts).toHaveLength(promptsBeforeRunning)
 
       await finishPromise
-      expect(crew.list()[0]?.assignments[0]?.state).toBe('completed')
+      expect(crew.list({ includeArchived: true })[0]?.assignments[0]?.state).toBe('completed')
 
       const deniedAfterFinish = await invokeTool(crewTool as Tool<never>, { action: 'remove', id: active.bot.id }, { policy: new DefaultPermissionPolicy({ mode: 'ask' }), ask: askDeny })
       expect(deniedAfterFinish?.isError).toBe(true)
       expect(deniedAfterFinish?.result).toContain('denied')
-      expect(crew.list()).toHaveLength(1)
+      expect(crew.list({ includeArchived: true })).toHaveLength(1)
 
       const allowedAfterFinish = await invokeTool(crewTool as Tool<never>, { action: 'remove', id: active.bot.id }, { policy: new DefaultPermissionPolicy({ mode: 'ask' }), ask: askAllow })
       expect(allowedAfterFinish?.isError).toBe(false)
-      expect(crew.list()).toEqual([])
+      expect(crew.list({ includeArchived: true })).toEqual([])
 
       // Running bot is also refused in yolo until completed, then deleted without asking once completed.
       const activeYolo = await crew.start({ name: 'Runner2', mission: 'Build', model: 'm', sessionId: 's' })

@@ -179,6 +179,8 @@ const botSchema = z.object({
   handle: z.string().optional(),
   instructions: z.string().optional(),
   createdAt: z.number(),
+  ephemeral: z.boolean().optional(),
+  archivedAt: z.number().optional(),
   avatar: crewAvatarSchema.optional(),
   assignments: z.array(assignmentSchema),
 })
@@ -194,12 +196,18 @@ function isDeadPid(pid: number, instanceId: string | undefined, identity: string
 
 function markDeadProcesses(bots: CrewBot[], forStartupRecover = false): boolean {
   let changed = false
-  for (const bot of bots) for (const assignment of bot.assignments) {
-    if (assignment.state !== 'running' || assignment.processId === undefined) continue
-    if (!isDeadPid(assignment.processId, assignment.instanceId, assignment.processIdentity, forStartupRecover)) continue
-    assignment.state = 'interrupted'
-    assignment.report = 'The process running this assignment stopped before it finished.'
-    changed = true
+  for (const bot of bots) {
+    for (const assignment of bot.assignments) {
+      if (assignment.state !== 'running' || assignment.processId === undefined) continue
+      if (!isDeadPid(assignment.processId, assignment.instanceId, assignment.processIdentity, forStartupRecover)) continue
+      assignment.state = 'interrupted'
+      assignment.report = 'The process running this assignment stopped before it finished.'
+      changed = true
+    }
+    if (bot.ephemeral && !bot.assignments.some((entry) => entry.state === 'running') && bot.archivedAt === undefined) {
+      bot.archivedAt = Date.now()
+      changed = true
+    }
   }
   return changed
 }
@@ -244,17 +252,19 @@ export class CrewStore {
     }
   }
 
-  list(): CrewBot[] {
+  list(options?: { includeArchived?: boolean }): CrewBot[] {
     const bots = this.readRaw()
     if (!bots) return []
     markDeadProcesses(bots)
     resolveBotHandles(bots)
     for (const bot of bots) bot.avatar = resolveBotAvatar(bot)
-    return bots.sort((a, b) => {
+    const visible = options?.includeArchived ? bots : bots.filter((bot) => bot.archivedAt === undefined)
+    return visible.sort((a, b) => {
       const left = a.assignments.at(-1)
       const right = b.assignments.at(-1)
       return (
         Number(right?.state === 'running') - Number(left?.state === 'running') ||
+        Number(a.archivedAt !== undefined) - Number(b.archivedAt !== undefined) ||
         (right?.startedAt ?? 0) - (left?.startedAt ?? 0) ||
         b.createdAt - a.createdAt
       )
@@ -264,7 +274,7 @@ export class CrewStore {
   get(id: string): CrewBot | undefined {
     const trimmed = id.trim()
     if (!trimmed) return undefined
-    return this.list().find((bot) => bot.id === trimmed)
+    return this.list({ includeArchived: true }).find((bot) => bot.id === trimmed)
   }
 
   findByHandle(rawHandle: string): CrewBot | undefined {
@@ -322,8 +332,10 @@ export class CrewStore {
         const id = randomUUID()
         const taken = new Set(bots.map((entry) => entry.handle).filter((h): h is string => Boolean(h)))
         const handle = nextUniqueHandle(name, taken)
-        bot = { id, name, handle, createdAt: Date.now(), avatar: defaultBotAvatar(id, name), assignments: [] }
+        bot = { id, name, handle, createdAt: Date.now(), ephemeral: true, avatar: defaultBotAvatar(id, name), assignments: [] }
         bots.push(bot)
+      } else {
+        delete bot.archivedAt
       }
       const assignment: CrewAssignment = {
         id: randomUUID(), sessionId: input.sessionId, mission: input.mission,
@@ -341,12 +353,16 @@ export class CrewStore {
 
   async finish(botId: string, assignmentId: string, state: 'completed' | 'failed' | 'interrupted', report: string, appliedGuidance: string[] = []): Promise<'completed' | 'failed' | 'interrupted'> {
     return this.change((bots) => {
-      const assignment = bots.find((bot) => bot.id === botId)?.assignments.find((entry) => entry.id === assignmentId)
-      if (assignment?.state !== 'running') throw new Error('The running assignment was not found.')
+      const bot = bots.find((entry) => entry.id === botId)
+      const assignment = bot?.assignments.find((entry) => entry.id === assignmentId)
+      if (!bot || assignment?.state !== 'running') throw new Error('The running assignment was not found.')
       assignment.state = assignment.stopRequestedAt ? 'interrupted' : state
       assignment.report = report
       assignment.finishedAt = Date.now()
       for (const guidance of assignment.guidance ?? []) if (appliedGuidance.includes(guidance.id)) guidance.appliedAt = assignment.finishedAt
+      if (bot.ephemeral && !bot.assignments.some((entry) => entry.state === 'running')) {
+        bot.archivedAt = assignment.finishedAt
+      }
       return assignment.state
     })
   }
@@ -450,6 +466,17 @@ export class CrewStore {
 
   async rename(id: string, name: string): Promise<CrewBot> {
     return this.updateProfile(id, { name })
+  }
+
+  /** Promotes a one-off task bot (or restores an archived one) to stay in the active Crew list. */
+  async keep(id: string): Promise<CrewBot> {
+    return this.change((bots) => {
+      const bot = bots.find((entry) => entry.id === id)
+      if (!bot) throw new Error('No bot has that id.')
+      delete bot.ephemeral
+      delete bot.archivedAt
+      return bot
+    })
   }
 
   async remove(id: string): Promise<CrewBot> {

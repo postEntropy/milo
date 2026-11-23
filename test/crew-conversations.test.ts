@@ -262,9 +262,33 @@ describe('Crew conversations, mentions, and profiles', () => {
     expect(crew.get(comunista.id)?.assignments).toHaveLength(1)
 
     await collectEvents(normalSession.send('Delegate to auto bot'))
-    const autoBot = crew.list().find((b) => b.name === 'AutoScout')
+    expect(crew.list().find((b) => b.name === 'AutoScout')).toBeUndefined()
+    const autoBot = crew.list({ includeArchived: true }).find((b) => b.name === 'AutoScout')
     expect(autoBot).toBeDefined()
+    expect(autoBot?.ephemeral).toBe(true)
+    expect(autoBot?.archivedAt).toBeTypeOf('number')
     expect(autoBot?.assignments).toHaveLength(1)
+
+    // /crew hides archived one-off bots from the active list, /crew archived lists them, /crew <id> shows reports, and /crew keep promotes them.
+    const cmdCtx = buildCommandContext({
+      runtime: runtime2,
+      session: normalSession,
+      scope: normalSession.scope,
+    })
+    const activeList = await handleCommand('/crew', cmdCtx)
+    expect(activeList.reply).not.toContain('AutoScout')
+    expect(activeList.reply).toContain('Archived task bots: 1 (/crew archived)')
+
+    const archivedList = await handleCommand('/crew archived', cmdCtx)
+    expect(archivedList.reply).toContain('AutoScout')
+
+    const inspectArchived = await handleCommand(`/crew ${autoBot!.id}`, cmdCtx)
+    expect(inspectArchived.reply).toContain('AutoScout')
+    expect(inspectArchived.reply).toContain('archived')
+
+    const kept = await handleCommand(`/crew keep ${autoBot!.id}`, cmdCtx)
+    expect(kept.reply).toContain('Kept bot AutoScout')
+    expect(crew.list().find((b) => b.id === autoBot!.id)).toBeDefined()
   })
 
   it('routes dual mentions with isolated Turn 1 context, preserves authorship across reopen, supports Turn 2 reply, and isolates single-bot failures', async () => {

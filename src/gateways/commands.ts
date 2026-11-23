@@ -98,13 +98,14 @@ export interface CommandContext {
   jobs?: () => JobInfo[]
   /** Stops a running job by id, for `/jobs kill <id>`. */
   killJob?: (id: string) => boolean
-  crew?: () => CrewBot[]
+  crew?: (options?: { includeArchived?: boolean }) => CrewBot[]
   createCrewBot?: (input: { name: string; handle?: string; instructions?: string }) => Promise<CrewBot>
   updateCrewProfile?: (id: string, patch: { name?: string; handle?: string; instructions?: string }) => Promise<CrewBot>
   renameCrewBot?: (id: string, name: string) => Promise<CrewBot>
   updateCrewAvatar?: (id: string, patch: Partial<CrewAvatar> | 'shuffle') => Promise<CrewBot>
   stopCrewBot?: (id: string) => Promise<void>
   guideCrewBot?: (id: string, text: string) => Promise<void>
+  keepCrewBot?: (id: string) => Promise<CrewBot>
   removeCrewBot?: (id: string) => Promise<CrewBot>
   delegatedWork?: () => DelegatedWork[]
   controlDelegatedWork?: (id: string, action: 'pause' | 'resume' | 'cancel') => Promise<DelegatedWork>
@@ -358,13 +359,14 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     // not what another conversation is doing.
     jobs: () => runtime.jobs?.list(session.id) ?? [],
     killJob: (id) => runtime.jobs?.kill(id, session.id) ?? false,
-    crew: runtime.crew ? () => runtime.crew!.list() : undefined,
+    crew: runtime.crew ? (options) => runtime.crew!.list(options) : undefined,
     createCrewBot: runtime.crew ? (input) => runtime.crew!.create(input) : undefined,
     updateCrewProfile: runtime.crew ? (id, patch) => runtime.crew!.updateProfile(id, patch) : undefined,
     renameCrewBot: runtime.crew ? (id, name) => runtime.crew!.rename(id, name) : undefined,
     updateCrewAvatar: runtime.crew ? (id, patch) => runtime.crew!.updateAvatar(id, patch) : undefined,
     stopCrewBot: runtime.crew ? (id) => runtime.crew!.stop(id) : undefined,
     guideCrewBot: runtime.crew ? (id, text) => runtime.crew!.guide(id, text) : undefined,
+    keepCrewBot: runtime.crew ? (id) => runtime.crew!.keep(id) : undefined,
     removeCrewBot: runtime.crew ? (id) => runtime.crew!.remove(id) : undefined,
     delegatedWork: runtime.delegatedWork ? () => runtime.delegatedWork!.list() : undefined,
     controlDelegatedWork: runtime.delegatedWork ? (id, action) => runtime.delegatedWork!.control(id, action) : undefined,
@@ -839,6 +841,13 @@ export async function handleCommand(
           await context.stopCrewBot(tokens[1]!)
           return { handled: true, reply: 'Stop requested.' }
         }
+        if (sub === 'keep') {
+          mutating = true
+          if (tokens.length !== 2) return { handled: true, reply: 'Usage: /crew keep <id>.' }
+          if (!context.keepCrewBot) return { handled: true, reply: 'Keeping a bot is not available on this surface.' }
+          const bot = await context.keepCrewBot(tokens[1]!)
+          return { handled: true, reply: `Kept bot ${bot.name} (${bot.id}) in Crew.` }
+        }
         if (sub === 'remove') {
           mutating = true
           if (tokens.length !== 2) return { handled: true, reply: 'Usage: /crew remove <id>.' }
@@ -846,18 +855,44 @@ export async function handleCommand(
           const bot = await context.removeCrewBot(tokens[1]!)
           return { handled: true, reply: `Removed bot ${bot.name} (${bot.id}).` }
         }
-        if (tokens.length > 1) return { handled: true, reply: 'Usage: /crew [id | create <name> | rename <id> <name> | handle <id> <handle> | instructions <id> <text|none> | chat <id> | avatar <id> [shuffle] | stop <id> | guide <id> <text> | remove <id>].' }
-        const bots = context.crew()
-        if (!tokens.length) return { handled: true, reply: bots.length ? bots.map((bot) => {
+        if (tokens.length > 1) return { handled: true, reply: 'Usage: /crew [id | archived | create <name> | rename <id> <name> | handle <id> <handle> | instructions <id> <text|none> | chat <id> | avatar <id> [shuffle] | stop <id> | guide <id> <text> | keep <id> | remove <id>].' }
+        const formatBotLine = (bot: CrewBot) => {
           const last = bot.assignments.at(-1)
           const handleTag = bot.handle ? ` @${bot.handle}` : ''
           return `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}${handleTag} (${bot.id}) — ${last?.state ?? 'available'}${last ? ` — ${last.mission}` : ''}`
-        }).join('\n') : 'No Crew bots yet.' }
+        }
+        if (sub === 'archived') {
+          const archived = context.crew({ includeArchived: true }).filter((bot) => bot.archivedAt !== undefined)
+          return {
+            handled: true,
+            reply: archived.length
+              ? archived.map(formatBotLine).join('\n')
+              : 'No archived task bots.',
+          }
+        }
+        if (!tokens.length) {
+          const active = context.crew()
+          const archivedCount = context.crew({ includeArchived: true }).filter((bot) => bot.archivedAt !== undefined).length
+          if (active.length === 0) {
+            return {
+              handled: true,
+              reply: archivedCount > 0
+                ? `No active Crew bots. ${archivedCount} archived task ${archivedCount === 1 ? 'bot' : 'bots'} — use /crew archived to view.`
+                : 'No Crew bots yet.',
+            }
+          }
+          const lines = active.map(formatBotLine)
+          if (archivedCount > 0) {
+            lines.push(`Archived task bots: ${archivedCount} (/crew archived)`)
+          }
+          return { handled: true, reply: lines.join('\n') }
+        }
+        const bots = context.crew({ includeArchived: true })
         const ref = tokens[0]!
         const normalizedRef = ref.replace(/^@+/, '').toLowerCase()
         const bot = bots.find((entry) => entry.id === ref || entry.handle === normalizedRef)
         if (!bot) return { handled: true, reply: 'No bot has that id. Use /crew to list bots, or /crew stop <id> to stop one.' }
-        const handleLine = bot.handle ? `Mention: @${bot.handle} · ID: ${bot.id}` : `ID: ${bot.id}`
+        const handleLine = `${bot.handle ? `Mention: @${bot.handle} · ` : ''}ID: ${bot.id}${bot.archivedAt !== undefined ? ' · archived' : ''}`
         const instructionsLine = bot.instructions ? `Instructions:\n${bot.instructions}` : undefined
         return {
           handled: true,

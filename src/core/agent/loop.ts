@@ -626,9 +626,9 @@ async function executeCall(
   } else if (call.name === 'crew' && call.args && typeof call.args === 'object' && context.crew) {
     const args = call.args as Record<string, unknown>
     if (args.action === 'remove' && typeof args.id === 'string') {
-      let bot: ReturnType<NonNullable<ToolContext['crew']>['list']>[number] | undefined
+      let bot: ReturnType<NonNullable<ToolContext['crew']>['get']>
       try {
-        bot = context.crew.list().find((entry) => entry.id === args.id)
+        bot = context.crew.get(args.id)
       } catch (error) {
         return { content: `Could not access Crew: ${errorMessage(error)}`, isError: true }
       }

@@ -98,6 +98,31 @@ interface ToolBotPreview {
   avatar: CrewAvatar
 }
 
+export interface KnownBotAvatar {
+  id: string
+  name: string
+  handle?: string
+  avatar?: Partial<CrewAvatar>
+}
+
+function resolveKnownBot(
+  explicitId: string | undefined,
+  name: string,
+  knownBots?: ReadonlyArray<KnownBotAvatar>,
+): KnownBotAvatar | undefined {
+  if (!knownBots || knownBots.length === 0) return undefined
+  if (explicitId) {
+    const byId = knownBots.find((bot) => bot.id === explicitId)
+    if (byId) return byId
+  }
+  const target = name.trim().toLowerCase()
+  const normalizedTarget = target.replace(/^@+/, '')
+  const byName = knownBots.filter((bot) => bot.name.trim().toLowerCase() === target)
+  if (byName.length === 1) return byName[0]
+  if (byName.length > 1) return byName[0]
+  return knownBots.find((bot) => bot.handle && bot.handle.toLowerCase() === normalizedTarget)
+}
+
 function readInputField(input: string | null | undefined, key: string): string | undefined {
   if (!input) return undefined
   const match = new RegExp(`^${key}:\\s*(.+)$`, 'm').exec(input)
@@ -105,12 +130,15 @@ function readInputField(input: string | null | undefined, key: string): string |
 }
 
 /** Extracts a Crew bot identity and avatar from a `task` tool call for organic inline display. */
-export function extractToolBot(tool: {
-  name: string
-  text?: string
-  input?: string | null
-  result?: string | null
-}): ToolBotPreview | null {
+export function extractToolBot(
+  tool: {
+    name: string
+    text?: string
+    input?: string | null
+    result?: string | null
+  },
+  knownBots?: ReadonlyArray<KnownBotAvatar>,
+): ToolBotPreview | null {
   if (tool.name !== 'task') return null
   const resultMatch = tool.result ? /^Crew bot (.+?) \(([^)\n]+)\):\n([\s\S]*)$/.exec(tool.result) : null
   const stoppedMatch = !resultMatch && tool.result ? /^Crew bot (.+?)(?: \(([^)\n]+)\))? was stopped\.?(?:\s*Partial report:\n([\s\S]*))?$/.exec(tool.result) : null
@@ -122,7 +150,7 @@ export function extractToolBot(tool: {
 
   const strippedText = tool.text?.replace(/^Task\s+/i, '').trim() ?? ''
   const [textFirst, ...textRest] = strippedText.split(' · ')
-  const name = (
+  const rawName = (
     resultMatch?.[1] ??
     stoppedMatch?.[1] ??
     inputName ??
@@ -131,8 +159,11 @@ export function extractToolBot(tool: {
     strippedText
   )?.trim()
 
-  if (!name) return null
-  const id = (resultMatch?.[2] ?? stoppedMatch?.[2] ?? inputBotId ?? name).trim()
+  if (!rawName) return null
+  const explicitId = (resultMatch?.[2] ?? stoppedMatch?.[2] ?? inputBotId)?.trim() || undefined
+  const matched = resolveKnownBot(explicitId, rawName, knownBots)
+  const id = matched?.id ?? explicitId ?? rawName
+  const name = matched?.name ?? rawName
   const task = (inputDesc ?? (textRest.length > 0 ? textRest.join(' · ') : strippedText)).trim() || undefined
   const model = inputModel ? (inputProvider ? `${inputProvider}/${inputModel}` : inputModel) : undefined
   const report = (resultMatch?.[3] ?? stoppedMatch?.[3] ?? tool.result ?? '')?.trim() || undefined
@@ -145,6 +176,9 @@ export function extractToolBot(tool: {
     }
   }
 
+  const base = defaultBotAvatar(id, name)
+  const avatar: CrewAvatar = matched?.avatar ? { ...base, ...matched.avatar } : base
+
   return {
     id,
     name,
@@ -152,7 +186,7 @@ export function extractToolBot(tool: {
     mission,
     model,
     report,
-    avatar: defaultBotAvatar(id, name),
+    avatar,
   }
 }
 

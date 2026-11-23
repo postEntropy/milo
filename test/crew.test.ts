@@ -23,7 +23,7 @@ describe('Crew', () => {
     await crew.rename(first.bot.id, 'Sage')
     const second = await crew.start({ botId: first.bot.id, name: 'Sage', mission: 'Review it', model: 'm2', sessionId: 's2' })
     await crew.finish(second.bot.id, second.assignment.id, 'failed', 'The model failed.')
-    expect(new CrewStore(file).list()).toMatchObject([{ name: 'Sage', assignments: [
+    expect(new CrewStore(file).list({ includeArchived: true })).toMatchObject([{ name: 'Sage', assignments: [
       { mission: 'Read the code', state: 'completed', report: 'Found the entry point.', model: 'm1' },
       { mission: 'Review it', state: 'failed', report: 'The model failed.', model: 'm2' },
     ] }])
@@ -49,7 +49,7 @@ describe('Crew', () => {
     const first = await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
     await crew.guide(first.bot.id, 'Look at tests too')
     await crew.finish(first.bot.id, first.assignment.id, 'completed', 'Done')
-    expect(crew.list()[0]?.assignments[0]?.guidance).toEqual([{ id: expect.any(String), text: 'Look at tests too', at: expect.any(Number) }])
+    expect(crew.get(first.bot.id)?.assignments[0]?.guidance).toEqual([{ id: expect.any(String), text: 'Look at tests too', at: expect.any(Number) }])
     await expect(crew.guide(first.bot.id, 'Too late')).rejects.toThrow('not accepting')
   })
 
@@ -62,7 +62,8 @@ describe('Crew', () => {
 
   it('lists active bots before finished ones on every surface', async () => {
     const { crew } = store()
-    const finished = await crew.start({ name: 'Sage', mission: 'Review', model: 'm', sessionId: 's' })
+    const sage = await crew.create({ name: 'Sage' })
+    const finished = await crew.start({ botId: sage.id, name: 'Sage', mission: 'Review', model: 'm', sessionId: 's' })
     await crew.finish(finished.bot.id, finished.assignment.id, 'completed', 'Done')
     await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
     expect(crew.list().map((bot) => bot.name)).toEqual(['Scout', 'Sage'])
@@ -159,7 +160,7 @@ describe('Crew', () => {
       const next = await crew.start({ botId: bot.id, name: bot.name, mission: `M${index}`, model: 'm', sessionId: 's' })
       await crew.finish(bot.id, next.assignment.id, 'completed', `R${index}`)
     }
-    expect(crew.list()[0]?.assignments).toHaveLength(50)
+    expect(crew.get(bot.id)?.assignments).toHaveLength(50)
 
     const { crew: pidCrew, file: pidFile } = store()
     await pidCrew.start({ name: 'Orphan', mission: 'Hang', model: 'm', sessionId: 's' })
@@ -167,7 +168,8 @@ describe('Crew', () => {
     raw[0]!.assignments[0]!.processId = 999_999_999
     writeFileSync(pidFile, JSON.stringify(raw))
     await new CrewStore(pidFile).recover()
-    expect(new CrewStore(pidFile).list()[0]?.assignments[0]?.state).toBe('interrupted')
+    expect(new CrewStore(pidFile).list()).toEqual([])
+    expect(new CrewStore(pidFile).list({ includeArchived: true })[0]?.assignments[0]?.state).toBe('interrupted')
   })
 
   it('exposes crewTool actions and rejects no-op avatar updates', async () => {
@@ -292,5 +294,83 @@ describe('Crew', () => {
       instructions: 'Updated instructions.',
     }, ctx)).content)
     expect(updatedViaTool.instructions).toBe('Updated instructions.')
+  })
+
+  it('resolves running and custom task avatars consistently from known Crew bots', async () => {
+    const { crew } = store()
+    const customAvatar = {
+      shape: 'capsule' as const,
+      eyes: 'visor' as const,
+      accessory: 'headphones' as const,
+      palette: 'tangerine' as const,
+    }
+    const created = await crew.create({
+      name: 'Pistas Hermes',
+      instructions: 'Inspect Hermes logs.',
+      avatar: customAvatar,
+    })
+
+    // While running (`result` absent and `botId` omitted from tool args), match by bot name against Crew.
+    const runningPreview = extractToolBot(
+      {
+        name: 'task',
+        text: 'Task Pistas Hermes · Investigar conversas do Hermes no cofre',
+        input: 'name: Pistas Hermes\ndescription: Investigar conversas do Hermes no cofre\nprompt: Inspect.',
+      },
+      crew.list(),
+    )
+    expect(runningPreview).not.toBeNull()
+    expect(runningPreview?.id).toBe(created.id)
+    expect(runningPreview?.avatar).toEqual(customAvatar)
+
+    // Without matching known bots, explicit result `(botId)` still governs seed resolution.
+    const completedPreview = extractToolBot(
+      {
+        name: 'task',
+        text: 'Task Pistas Hermes · Done',
+        result: `Crew bot Pistas Hermes (${created.id}):\nDone.`,
+      },
+      crew.list(),
+    )
+    expect(completedPreview?.id).toBe(created.id)
+    expect(completedPreview?.avatar).toEqual(customAvatar)
+  })
+
+  it('archives one-off task bots when finished, preserves their reports, and lets keep promote them to permanent Crew', async () => {
+    const { crew } = store()
+    const permanent = await crew.create({ name: 'Reviewer', handle: 'reviewer', instructions: 'Review carefully.' })
+
+    // One-off task bot appears in active list while running.
+    const oneOff = await crew.start({ name: 'History Scout', mission: 'Trace backup timeline', model: 'm1', sessionId: 's1' })
+    expect(oneOff.bot.ephemeral).toBe(true)
+    expect(crew.list().map((b) => b.id)).toEqual([oneOff.bot.id, permanent.id])
+
+    // Once finished, the one-off bot is archived and leaves the active list and handle mentions.
+    await crew.finish(oneOff.bot.id, oneOff.assignment.id, 'completed', 'Full chronology found.')
+    expect(crew.list().map((b) => b.id)).toEqual([permanent.id])
+    expect(crew.findByHandle(oneOff.bot.handle!)).toBeUndefined()
+
+    // Its report and history remain accessible via get() and list({ includeArchived: true }).
+    const archived = crew.get(oneOff.bot.id)
+    expect(archived?.archivedAt).toBeTypeOf('number')
+    expect(archived?.assignments[0]?.report).toBe('Full chronology found.')
+    expect(crew.list({ includeArchived: true }).map((b) => b.id)).toEqual([permanent.id, oneOff.bot.id])
+
+    // Permanent bot stays active even after finishing an assignment.
+    const permRun = await crew.start({ botId: permanent.id, name: permanent.name, mission: 'Check diff', model: 'm1', sessionId: 's1' })
+    await crew.finish(permRun.bot.id, permRun.assignment.id, 'completed', 'Looks good.')
+    expect(crew.list().map((b) => b.id)).toEqual([permanent.id])
+
+    // crewTool can inspect archived bots, list them with includeArchived, and keep them in Crew.
+    const ctx = { cwd: tmpdir(), signal: new AbortController().signal, crew }
+    expect(JSON.parse((await crewTool.execute({ action: 'list' }, ctx)).content)).toHaveLength(1)
+    expect(JSON.parse((await crewTool.execute({ action: 'list', includeArchived: true }, ctx)).content)).toHaveLength(2)
+    expect(JSON.parse((await crewTool.execute({ action: 'show', id: oneOff.bot.id }, ctx)).content).assignments[0].report).toBe('Full chronology found.')
+
+    const kept = JSON.parse((await crewTool.execute({ action: 'keep', id: oneOff.bot.id }, ctx)).content)
+    expect(kept.ephemeral).toBeUndefined()
+    expect(kept.archivedAt).toBeUndefined()
+    expect(crew.list().map((b) => b.id)).toContain(oneOff.bot.id)
+    expect(crew.findByHandle(oneOff.bot.handle!)?.id).toBe(oneOff.bot.id)
   })
 })
