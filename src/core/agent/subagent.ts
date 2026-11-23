@@ -31,6 +31,11 @@ export interface SubagentRun {
    * same `~/.milo/AGENTS.md` the parent does.
    */
   ownInstructions?: ProjectInstructions
+  /**
+   * Bounded user messages from the parent session, so active session constraints
+   * (such as privacy boundaries) reach the subagent even if omitted from `input.prompt`.
+   */
+  sessionUserMessages?: readonly string[]
   /** The folder a delegated write may not leave; the parent's project. */
   confineTo?: string
   /** How the delegated shell is contained, when the parent's is. */
@@ -118,6 +123,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     skills: options.skills,
     instructions: options.instructions,
     ownInstructions: options.ownInstructions,
+    sessionUserMessages: options.sessionUserMessages,
     project: options.project,
     browser: options.browser ?? null,
     mcp: options.mcp ?? null,

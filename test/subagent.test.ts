@@ -76,6 +76,20 @@ describe('task tool', () => {
   it('offers delegation on every surface with the same confirmations', () => {
     expect(taskDescription(true)).toContain('put to the user the same way')
     expect(taskDescription(false)).toEqual(taskDescription(true))
+    expect(taskTool.description).toContain('privacy')
+    expect(taskTool.description).toContain('chronology')
+    expect(taskTool.description).toContain('existing mechanism')
+  })
+
+  it('guides the main agent and subagent on constraints, chronology, and report usage', async () => {
+    const { DEFAULT_SYSTEM_PROMPT, SUBAGENT_SYSTEM_PROMPT } = await import('../src/core/agent/system.js')
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('privacy')
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('chronology')
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('existing mechanism')
+    expect(DEFAULT_SYSTEM_PROMPT).toContain('real gap')
+    expect(SUBAGENT_SYSTEM_PROMPT).toContain('privacy')
+    expect(SUBAGENT_SYSTEM_PROMPT).toContain('chronology')
+    expect(SUBAGENT_SYSTEM_PROMPT).toContain('existing mechanisms')
   })
 
   it('never asks on its own, but deny still blocks it', async () => {

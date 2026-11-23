@@ -1445,7 +1445,8 @@ describe('delegation to a subagent', () => {
       [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
     ])
     const { events } = await delegate(provider, crew)
-    expect(crew.list()).toMatchObject([{ name: 'Scout', assignments: [{ mission: 'Read the code', model: 'test-model', state: 'completed', report: 'REPORT' }] }])
+    expect(crew.list()).toEqual([])
+    expect(crew.list({ includeArchived: true })).toMatchObject([{ name: 'Scout', assignments: [{ mission: 'Read the code', model: 'test-model', state: 'completed', report: 'REPORT' }] }])
     expect(events.find((event) => event.type === 'tool-end' && event.name === 'task')).toMatchObject({ result: expect.stringContaining('Crew bot Scout') })
   })
 
@@ -1463,7 +1464,7 @@ describe('delegation to a subagent', () => {
     await delegate(parent, crew, () => alternate)
     expect(alternate.lastModel).toBe('other-model')
     expect(parent.calls).toBe(2)
-    expect(crew.list()[0]?.assignments[0]?.model).toBe('other-model')
+    expect(crew.list({ includeArchived: true })[0]?.assignments[0]?.model).toBe('other-model')
   })
 
   it('uses another configured provider for a bot without switching the parent', async () => {
@@ -1479,7 +1480,7 @@ describe('delegation to a subagent', () => {
     expect(requested).toEqual(['other/other-model'])
     expect(alternate.lastModel).toBe('other-model')
     expect(parent.calls).toBe(2)
-    expect(crew.list()[0]?.assignments[0]).toMatchObject({ provider: alternate.id, model: 'other-model' })
+    expect(crew.list({ includeArchived: true })[0]?.assignments[0]).toMatchObject({ provider: alternate.id, model: 'other-model' })
   })
 
   it('reports an unavailable bot provider instead of silently using another', async () => {
@@ -1523,7 +1524,7 @@ describe('delegation to a subagent', () => {
     const bot = crew.list()[0]!
     await new CrewStore(file).stop(bot.id)
     const { events } = await work
-    expect(crew.list()[0]?.assignments[0]?.state).toBe('interrupted')
+    expect(crew.list({ includeArchived: true })[0]?.assignments[0]?.state).toBe('interrupted')
     expect(events.find((event) => event.type === 'tool-end' && event.name === 'task')).toMatchObject({ isError: true, result: expect.stringContaining('stopped') })
     expect(parent.calls).toBe(2)
   })
@@ -1558,7 +1559,7 @@ describe('delegation to a subagent', () => {
     await work
     expect(seen).toHaveLength(2)
     expect(JSON.stringify(seen[1]?.messages)).toContain('Check the tests too')
-    expect(crew.list()[0]?.assignments[0]?.guidance?.[0]?.appliedAt).toBeTypeOf('number')
+    expect(crew.list({ includeArchived: true })[0]?.assignments[0]?.guidance?.[0]?.appliedAt).toBeTypeOf('number')
   })
 
   it('applies the bot model profile instead of inheriting the parent model limits', async () => {
@@ -1599,6 +1600,71 @@ describe('delegation to a subagent', () => {
     for await (const _event of session.send('go')) { /* drain */ }
     expect(seenRequest?.maxTokens).toBe(2048)
     expect(seenRequest?.reasoningEffort).toBeUndefined()
+  })
+
+  it('carries active session user constraints to the delegated subagent even when omitted from the brief, without promoting history or tool output', async () => {
+    let subagentSystem = ''
+    const alternate: Provider = {
+      id: 'sub',
+      async *stream(request) {
+        subagentSystem = request.system ?? ''
+        yield { type: 'text', delta: 'Report without MEGA' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const parent = new ScriptedProvider([
+      [{ type: 'text', delta: 'Understood, I will avoid MEGA.' }, { type: 'done', finishReason: 'stop' }],
+      [
+        {
+          type: 'tool-call',
+          id: 'c1',
+          name: 'task',
+          args: { name: 'DB Scout', description: 'check db', prompt: 'Inspect the Indexer DB', model: 'sub-model' },
+        },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-privacy-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    record.summary = 'Earlier summary: user once asked to ignore cache'
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', chatId: 'task-privacy' },
+      record,
+      cwd: process.cwd(),
+      provider: parent,
+      providerFor: () => alternate,
+      crew: new CrewStore(path.join(dir, 'crew.json')),
+      maxSteps: 4,
+    })
+
+    for await (const _event of session.send('Do not look at MEGA files during this investigation.')) { /* drain */ }
+    for await (const _event of session.send('Check the Indexer database now.')) { /* drain */ }
+
+    expect(subagentSystem).toContain('## Session user messages')
+    expect(subagentSystem).toContain('Do not look at MEGA files during this investigation.')
+    expect(subagentSystem).toContain('Check the Indexer database now.')
+    expect(subagentSystem).not.toContain('Understood, I will avoid MEGA.')
+    expect(subagentSystem).not.toContain('Earlier summary: user once asked to ignore cache')
+
+    // Bounded extraction keeps the newest directives and ignores non-text parts.
+    const { extractSessionUserDirectives } = await import('../src/core/session.js')
+    const bounded = extractSessionUserDirectives(
+      [
+        { role: 'user', content: [{ type: 'text', text: 'Old turn that should drop' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'Assistant reply' }] },
+        { role: 'user', content: [{ type: 'text', text: 'Keep this constraint' }, { type: 'document', name: 'doc.txt', mimeType: 'text/plain', path: '/tmp/doc.txt' }] },
+      ],
+      undefined,
+      30,
+    )
+    expect(bounded).toEqual(['Keep this constraint'])
   })
 })
 
@@ -2004,7 +2070,7 @@ describe('Crew & Bot session integration', () => {
       expect(altRequests[0]?.nativePdf).toBe(true)
       const firstUser = altRequests[0]?.messages.find((m) => m.role === 'user')
       expect(Array.isArray(firstUser?.content) ? firstUser.content.some((p) => p.type === 'image') : false).toBe(false)
-      expect(crew.list()).toHaveLength(1)
+      expect(crew.list({ includeArchived: true })).toHaveLength(1)
     } finally {
       await memory.close()
     }
@@ -2062,7 +2128,7 @@ describe('Crew & Bot session integration', () => {
       await running
       expect(taskResult).toContain('was stopped')
       expect(taskResult).toContain('Partial progress')
-      const stored = crew.list()[0]!.assignments[0]!
+      const stored = crew.list({ includeArchived: true })[0]!.assignments[0]!
       expect(stored.state).toBe('interrupted')
       expect(stored.report).toContain('Partial progress')
       expect(stored.guidance?.[0]?.appliedAt).toBeUndefined()

@@ -12,7 +12,7 @@ const schema = z.object({
   prompt: z
     .string()
     .describe(
-      'The full instructions for the subagent. It starts with an empty context, cannot see this session and cannot ask you anything, so give it everything it needs: the goal, the relevant paths, and what its report should contain.',
+      'The full instructions for the subagent. It starts with an empty context, cannot see this session and cannot ask you anything, so give it everything it needs: the goal, the relevant context and paths, what its report should contain (including the full chronology up to the latest available record when tracing history or changes), and every relevant constraint from the conversation or session (including privacy, secrecy, and directory or scope limits).',
     ),
 })
 
@@ -25,7 +25,7 @@ export type TaskArgs = z.infer<typeof schema>
  * catalog carries is where the two differ.
  */
 const TASK_DESCRIPTION =
-  'Delegate a self-contained subtask to a Crew bot when that helps the work, or do it yourself when delegation would not help. Give the bot a short name and a complete mission: it has its own context and cannot see this session. To choose a different model or provider, first discover the available ids with the crew tool. It returns a report, runs the same tools as you, cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
+  'Delegate a self-contained subtask to a Crew bot when that helps the work, or do it yourself when delegation would not help. Give the bot a short name and a complete mission: it has its own context and cannot see this session. Include the goal, needed context, expected output (such as the full chronology up to the latest available record when investigating history or state changes), and every relevant constraint from the conversation or session rules — especially privacy, secrecy, and scope limits. To choose a different model or provider, first discover the available ids with the crew tool. It returns a report, runs the same tools as you, cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be. Before building a parallel solution from the report, weigh its findings and limitations — especially if it points to an existing mechanism that may already solve the problem — and build something new only when a real gap remains.'
 
 /** The description the catalog carries. */
 export function taskDescription(_project: boolean): string {

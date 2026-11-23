@@ -391,6 +391,42 @@ export interface SendOptions {
   sessionsAllowed?: boolean
 }
 
+/** Extracts bounded user text turns from the active session transcript (excluding attachments, tool output, and compacted summary). */
+const MAX_SESSION_USER_DIRECTIVE_CHARS = 3_000
+
+export function extractSessionUserDirectives(
+  messages: readonly Message[],
+  aside?: string,
+  maxChars = MAX_SESSION_USER_DIRECTIVE_CHARS,
+): string[] {
+  const raw: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    const text = message.content
+      .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join('\n')
+    if (text) raw.push(text)
+  }
+  const trimmedAside = aside?.trim()
+  if (trimmedAside) raw.push(trimmedAside)
+
+  const kept: string[] = []
+  let total = 0
+  for (let index = raw.length - 1; index >= 0; index -= 1) {
+    const entry = raw[index]!
+    if (kept.length === 0 && entry.length > maxChars) {
+      kept.unshift(`…${entry.slice(-(maxChars - 1))}`)
+      break
+    }
+    if (total + entry.length > maxChars) break
+    kept.unshift(entry)
+    total += entry.length
+  }
+  return kept
+}
+
 export class Session {
   /** The session's own name (`calm-otter-7`), not the transport address. */
   readonly id: string
@@ -1390,6 +1426,7 @@ export class Session {
               // the same folder, and must follow the same conventions it keeps.
               instructions: turnInstructions,
               ownInstructions: this.options.ownInstructions?.(),
+              sessionUserMessages: extractSessionUserDirectives(this.messages, opts?.aside),
               // The same boundary and the same box: a delegated write lands in the
               // same folder, and its commands are contained the same way.
               confineTo: turnProject?.ok ? turnProject.project.path : undefined,
