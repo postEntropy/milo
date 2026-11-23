@@ -1,7 +1,7 @@
 /** The sections of Settings: the id its address carries, its icon, and its name. */
 export const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['display', 'palette', 'Appearance'],
-  ['tools', 'settings', 'Tools'], ['skills', 'spark', 'Skills'], ['memory', 'database', 'Memory'], ['permissions', 'shield', 'Permissions'],
+  ['tools', 'settings', 'Tools'], ['mcp', 'mcp', 'MCP'], ['skills', 'spark', 'Skills'], ['memory', 'database', 'Memory'], ['permissions', 'shield', 'Permissions'],
   ['sessions', 'history', 'Sessions'], ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
 ] as const
 
@@ -13,7 +13,7 @@ export const settingsSectionGroups: ReadonlyArray<{
   ids: ReadonlyArray<SettingsSectionId>
 }> = [
   { label: 'General', ids: ['provider', 'keys', 'display'] },
-  { label: 'Agent', ids: ['tools', 'skills', 'memory', 'permissions'] },
+  { label: 'Agent', ids: ['tools', 'mcp', 'skills', 'memory', 'permissions'] },
   { label: 'System', ids: ['sessions', 'gateways', 'web'] },
 ]
 

@@ -610,88 +610,91 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <span className="composer-quote-text">{quote}</span>
           <button className="composer-quote-remove" type="button" title="Remove quote" aria-label="Remove quote" onClick={() => setQuote(null)}><Icon name="x" size={14} /></button>
         </div>}
-        <textarea
-          ref={ref}
-          aria-label="Message Milo"
-          placeholder="Ask Milo anything…"
-          rows={1}
-          value={draft}
-          onChange={(event) => { editDraft(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length) }}
-          onClick={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
-          onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
-          onKeyDown={key}
-        />
-        <div className="composer-toolbar">
-          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } setBoundedFileDraft(fileDrafts.current, draftKey, next); return next }); event.target.value = '' }} />
-          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
-          {canPlan && <button
-            type="button"
-            className="composer-pill mode-pill icon-only"
-            aria-pressed={plan}
-            aria-label={plan ? 'Plan mode' : 'Build mode'}
-            disabled={busy}
-            title={busy ? 'Wait for the turn to finish before changing the mode' : plan ? 'Plan mode is on — Milo proposes and changes nothing' : 'Build mode — Milo can change the folder; switch to plan first'}
-            onClick={() => onPlanChange(!plan)}
-          >
-            <Icon name={plan ? 'list-check' : 'code'} size={15} />
-          </button>}
-          <div className="composer-model-wrap">
-            <Select
-              className={`composer-pill composer-model-pill${folded ? ' icon-only' : ''}${model ? '' : ' is-empty'}`}
-              label="Model and reasoning effort"
-              leading={provider && provider !== 'milo' ? <ProviderMark id={provider} size={14} /> : <Icon name="spark" size={14} />}
-              body={wide ? (close) => <ModelPicker
-                className="composer-model-panes"
-                presets={providers ?? []}
-                provider={provider}
-                model={model}
-                browsing={browsing}
-                catalog={catalog}
-                note={error || 'This provider reports no models.'}
-                compact
-                onBrowse={browse}
-                onPick={(id) => { chooseModel(id); close() }}
-              /> : undefined}
-              filterExtra={wide ? undefined : <div className="composer-provider">
-                <Select
-                  label="Provider"
-                  value={browsing}
-                  triggerLabel={providers?.find((item) => item.id === browsing)?.name ?? providerName}
-                  choices={(providers ?? []).map((item) => ({ value: item.id, label: item.name }))}
-                  onChange={(next) => void browse(next)}
-                  onOpen={() => void loadProviders()}
-                  note="No other provider with a key is configured."
-                />
-              </div>}
-              foot={<div className="composer-effort">
-                <span className="composer-effort-title">Reasoning effort</span>
-                <ReasoningSlider value={effort} onChange={onEffortChange} />
-              </div>}
-              value={model}
-              triggerLabel={folded ? '' : (model ? shortModel(model) : 'Model')}
-              choices={(catalog ?? []).map((item) => ({
-                value: item.id, label: item.id, meta: <ModelDetails model={item} />,
-              }))}
-              onChange={chooseModel}
-              onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
-              note={loading ? 'Loading models…' : error || 'No models found.'}
-            />
+        <div className="composer-row">
+          <div className="composer-lead">
+            <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } setBoundedFileDraft(fileDrafts.current, draftKey, next); return next }); event.target.value = '' }} />
+            <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={16} /></button>
+            {canPlan && <button
+              type="button"
+              className="composer-pill mode-pill icon-only"
+              aria-pressed={plan}
+              aria-label={plan ? 'Plan mode' : 'Build mode'}
+              disabled={busy}
+              title={busy ? 'Wait for the turn to finish before changing the mode' : plan ? 'Plan mode is on — Milo proposes and changes nothing' : 'Build mode — Milo can change the folder; switch to plan first'}
+              onClick={() => onPlanChange(!plan)}
+            >
+              <Icon name={plan ? 'list-check' : 'code'} size={15} />
+            </button>}
           </div>
-          <span className="composer-spacer" />
-          {busy && (draft.trim() !== '' || files.length > 0) && <>
-            <button className="composer-send-action" type="button" onClick={() => void submit('queue')} title="Send after the current turn finishes"><Icon name="history" size={14} />Queue</button>
-            <button className="composer-send-action" type="button" onClick={() => void submit('steer')} title="Send guidance to the running turn"><Icon name="reply" size={14} />Steer</button>
-          </>}
-          {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
-            <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-              <circle className="composer-context-track" cx="11" cy="11" r="9" />
-              <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.budget))} />
-            </svg>
-            <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
-          </span>}
-          {busy
-            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo turn" onClick={onStop}><Icon name="stop" size={24} /></button>
-            : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
+          <textarea
+            ref={ref}
+            aria-label="Message Milo"
+            placeholder="Ask Milo anything…"
+            rows={1}
+            value={draft}
+            onChange={(event) => { editDraft(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length) }}
+            onClick={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
+            onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
+            onKeyDown={key}
+          />
+          <div className="composer-trail">
+            <div className="composer-model-wrap">
+              <Select
+                className={`composer-pill composer-model-pill${folded ? ' icon-only' : ''}${model ? '' : ' is-empty'}`}
+                label="Model and reasoning effort"
+                leading={provider && provider !== 'milo' ? <ProviderMark id={provider} size={14} /> : <Icon name="spark" size={14} />}
+                body={wide ? (close) => <ModelPicker
+                  className="composer-model-panes"
+                  presets={providers ?? []}
+                  provider={provider}
+                  model={model}
+                  browsing={browsing}
+                  catalog={catalog}
+                  note={error || 'This provider reports no models.'}
+                  compact
+                  onBrowse={browse}
+                  onPick={(id) => { chooseModel(id); close() }}
+                /> : undefined}
+                filterExtra={wide ? undefined : <div className="composer-provider">
+                  <Select
+                    label="Provider"
+                    value={browsing}
+                    triggerLabel={providers?.find((item) => item.id === browsing)?.name ?? providerName}
+                    choices={(providers ?? []).map((item) => ({ value: item.id, label: item.name }))}
+                    onChange={(next) => void browse(next)}
+                    onOpen={() => void loadProviders()}
+                    note="No other provider with a key is configured."
+                  />
+                </div>}
+                foot={<div className="composer-effort">
+                  <span className="composer-effort-title">Reasoning effort</span>
+                  <ReasoningSlider value={effort} onChange={onEffortChange} />
+                </div>}
+                value={model}
+                triggerLabel={folded ? '' : (model ? shortModel(model) : 'Model')}
+                choices={(catalog ?? []).map((item) => ({
+                  value: item.id, label: item.id, meta: <ModelDetails model={item} />,
+                }))}
+                onChange={chooseModel}
+                onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
+                note={loading ? 'Loading models…' : error || 'No models found.'}
+              />
+            </div>
+            {busy && (draft.trim() !== '' || files.length > 0) && <>
+              <button className="composer-send-action" type="button" onClick={() => void submit('queue')} title="Send after the current turn finishes"><Icon name="history" size={14} />Queue</button>
+              <button className="composer-send-action" type="button" onClick={() => void submit('steer')} title="Send guidance to the running turn"><Icon name="reply" size={14} />Steer</button>
+            </>}
+            {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
+              <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                <circle className="composer-context-track" cx="11" cy="11" r="9" />
+                <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.budget))} />
+              </svg>
+              <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
+            </span>}
+            {busy
+              ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo turn" onClick={onStop}><Icon name="stop" size={24} /></button>
+              : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
+          </div>
         </div>
       </div>
     </div>

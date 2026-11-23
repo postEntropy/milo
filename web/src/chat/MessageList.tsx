@@ -47,7 +47,7 @@ function Attachments({ items }: { items: FrameAttachment[] }) {
 /**
  * One call, as a line: the mark, the tool's name, and the one value worth showing.
  */
-function ToolLine({ tool, sessionId }: { tool: ToolMark; sessionId?: string }) {
+function ToolLine({ tool, sessionId, crewBots }: { tool: ToolMark; sessionId?: string; crewBots?: BotAuthor[] }) {
   const [open, setOpen] = useState(false)
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
@@ -60,7 +60,7 @@ function ToolLine({ tool, sessionId }: { tool: ToolMark; sessionId?: string }) {
   const preview = tool.preview ?? null
   const hasDetail = change !== null || result !== null || preview !== null || !!tool.input
   const canOpen = hasDetail || tool.state === 'running'
-  const bot = extractToolBot(tool)
+  const bot = extractToolBot(tool, crewBots)
   const line = <code>
     {bot
       ? <BotAvatar avatar={bot.avatar} state={tool.state} size={26} className="tool-bot-avatar" />
@@ -250,9 +250,9 @@ function ToolPreview({ id, callId, sessionId, width, height }: { id: string; cal
 /**
  * Calls made one after another are steps of one sequence, joined by a thread.
  */
-function ToolRun({ steps, sessionId }: { steps: Array<{ tool: ToolMark; key: string }>; sessionId?: string }) {
+function ToolRun({ steps, sessionId, crewBots }: { steps: Array<{ tool: ToolMark; key: string }>; sessionId?: string; crewBots?: BotAuthor[] }) {
   return <div className="tool-run">
-    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} sessionId={sessionId} />)}
+    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} sessionId={sessionId} crewBots={crewBots} />)}
   </div>
 }
 
@@ -376,6 +376,7 @@ export const MessageList = memo(function MessageList({
   suggestions,
   hasIdeas,
   sessionBot,
+  crewBots,
   sessionId,
   busy,
 }: {
@@ -398,6 +399,8 @@ export const MessageList = memo(function MessageList({
   hasIdeas?: boolean
   /** The bot bound to this direct Session, when chatting directly with a Crew bot. */
   sessionBot?: BotAuthor | null
+  /** Live Crew bots so `task` delegations share the exact persisted/seeded avatar. */
+  crewBots?: BotAuthor[]
   sessionId?: string
   busy?: boolean
 }) {
@@ -477,6 +480,7 @@ export const MessageList = memo(function MessageList({
           message={message}
           thinking={thinking}
           sessionId={sessionId}
+          crewBots={crewBots}
           busy={Boolean(busy)}
           running={message.id === runningId}
           turn={messageTurns.get(message.id) ?? 1}
@@ -568,10 +572,11 @@ function RoutineCard({ routine, children }: { routine: RoutineDelivery; children
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onDismissPending, onRestorePending, onQuote, onSend, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, sessionId, crewBots, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onDismissPending, onRestorePending, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: ThinkingDisplay
   sessionId?: string
+  crewBots?: BotAuthor[]
   busy: boolean
   /** The message this turn is still writing; its answer is not ready to act on. */
   running: boolean
@@ -611,7 +616,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy
       />
     ) : (
       toolRows(keyed).map((row) => {
-        if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} sessionId={sessionId} />
+        if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} sessionId={sessionId} crewBots={crewBots} />
         const { part, key } = row
         if (part.kind === 'reasoning') {
           // Every thought is on screen; the display only decides whether it
@@ -619,7 +624,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy
           return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
         }
         if (part.kind === 'text') return <Markdown key={key} text={part.text} />
-        if (part.kind === 'tool') return <ToolRun key={key} steps={[{ tool: part.tool, key }]} sessionId={sessionId} />
+        if (part.kind === 'tool') return <ToolRun key={key} steps={[{ tool: part.tool, key }]} sessionId={sessionId} crewBots={crewBots} />
         if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
         if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
         return <TodoList key={key} items={part.items} />
@@ -630,13 +635,16 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy
   </>
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}${running && message.waitingSince === undefined ? ' is-streaming' : ''}`}>
     <div className="message-content">
-      {message.bot && !message.routine && (
-        <div className="message-bot-head">
-          <BotAvatar avatar={botAvatarOf(message.bot)} state={running ? 'running' : undefined} size={34} />
-          <span className="message-bot-name">{message.bot.name}</span>
-          {message.bot.handle && <span className="message-bot-handle">@{message.bot.handle}</span>}
-        </div>
-      )}
+      {message.bot && !message.routine && (() => {
+        const liveBot = crewBots?.find((entry) => entry.id === message.bot?.id) ?? message.bot
+        return (
+          <div className="message-bot-head">
+            <BotAvatar avatar={botAvatarOf(liveBot)} state={running ? 'running' : undefined} size={34} />
+            <span className="message-bot-name">{liveBot.name}</span>
+            {liveBot.handle && <span className="message-bot-handle">@{liveBot.handle}</span>}
+          </div>
+        )
+      })()}
       {message.routine ? <RoutineCard routine={message.routine}>{body}</RoutineCard> : body}
       {message.actions && message.actions.length > 0 && (
         <div className="message-actions">
@@ -697,7 +705,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, busy
           <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} raw={message.raw} rawNoOutput={message.rawNoOutput} onFork={onFork} turn={turn} busy={busy} onQuote={onQuote} />
         </div>
       )}
-      {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
+      {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" icon="light" />}
       {!message.error && message.status && <div className="message-status">{message.status}</div>}
     </div>
     {message.delivery && <div className="message-delivery" role="status">
@@ -922,7 +930,7 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
         <span>{formatTokens(tokens.input)} in · {formatTokens(tokens.output)} out</span>
       </div>}
       {thinking && <div className="message-menu-row" role="presentation">
-        <Icon name="spark" size={14} />
+        <Icon name="light" size={14} />
         <span>{thoughtLabel(thoughtMs)}</span>
       </div>}
       {hasInfo && (raw || onQuote || onFork) && <div className="message-menu-sep" />}

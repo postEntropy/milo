@@ -915,7 +915,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                 meta={data.google.kind === 'connected' ? 'Connected' : data.google.kind === 'wanted' ? 'Not authorised' : 'Not connected'}
                 footer={
                   data.google.kind === 'connected'
-                    ? <>To change access level, run <code className="mono">milo google connect</code>. To disconnect, run <code className="mono">milo google forget</code>.</>
+                    ? <><code className="mono">milo google connect</code> to change access · <code className="mono">milo google forget</code> to disconnect.</>
                     : undefined
                 }
               >
@@ -924,7 +924,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                   badge={<span className="settings-tag">Restart</span>}
                   description={
                     data.google.kind === 'connected'
-                      ? `${data.google.email ?? 'Connected account'}${data.google.connectedAt ? ` · since ${data.google.connectedAt.slice(0, 10)}` : ''} · ${tierOf(data.google.tiers, data.google.access)?.label ?? data.google.access}`
+                      ? `${data.google.email ?? 'Connected account'}${data.google.connectedAt ? ` · since ${data.google.connectedAt.slice(0, 10)}` : ''}`
                       : 'Read mail and Drive, or grant write tiers with your own Google Cloud OAuth app.'
                   }
                 >
@@ -935,11 +935,14 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                   />
                 </SettingRow>
                 {data.google.kind === 'connected' && (
-                  <div className="settings-row">
-                    <p className="settings-row-desc">
-                      Reading: <code className="mono">{data.google.tools.join(', ')}</code>. Mail actions: <code className="mono">{data.google.writeTools.join(', ')}</code> — gated by access level and confirmed before acting.
-                    </p>
-                  </div>
+                  <SettingRow
+                    label="Access level"
+                    description={tierOf(data.google.tiers, data.google.access)?.description ?? 'Read Gmail and Drive.'}
+                  >
+                    <span className="settings-tag settings-tag-accent">
+                      {tierOf(data.google.tiers, data.google.access)?.label ?? data.google.access}
+                    </span>
+                  </SettingRow>
                 )}
                 {data.google.kind !== 'connected' && (
                   <div className="settings-row settings-row-stack">
@@ -1059,7 +1062,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                 <SettingRow
                   label="Enable Computer Use"
                   badge={<span className="settings-tag">Restart</span>}
-                  description="Drive native desktop applications on this machine. Unavailable in Plan mode, routines, and shared chats."
+                  description="Drive native desktop apps on this machine."
                 >
                   <Switch
                     label="Enable Computer Use"
@@ -1068,111 +1071,141 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                   />
                 </SettingRow>
                 {data.computer && (() => {
+                  const computer = data.computer
                   const setupHelp =
-                    data.computer.setupHelp !== undefined
-                      ? data.computer.setupHelp
-                      : computerSetupHelp(data.computer)
+                    computer.setupHelp !== undefined
+                      ? computer.setupHelp
+                      : computerSetupHelp(computer)
+                  const capabilities = [
+                    computer.displayServer,
+                    computer.atspiAvailable ? 'AT-SPI' : null,
+                    computer.screenCaptureAvailable ? 'Capture' : null,
+                  ].filter(Boolean).join(' · ')
                   return (
-                    <SettingRow
-                      label={
-                        <span className="settings-status-label">
-                          <span className={`settings-dot${data.computer.available ? ' is-ok' : ' is-off'}`} />
-                          {data.computer.summary}
-                        </span>
-                      }
-                      description={
-                        <>
-                          {data.computer.available ? 'Host backend ready' : (data.computer.reason ?? 'Host backend unavailable')}
-                          {data.computer.limitations.length > 0 && ` · ${data.computer.limitations.join(' · ')}`}
-                        </>
-                      }
-                    >
-                      <div className="settings-inline-actions">
-                        {setupHelp && onStartSession && (
-                          <button
-                            className="button primary settings-btn-sm"
-                            type="button"
-                            disabled={startingHelp}
-                            onClick={async () => {
-                              setStartingHelp(true)
-                              try {
-                                const outcome = await onStartSession(setupHelp.prompt)
-                                if (!outcome.ok && outcome.error) {
-                                  setNotice({ text: outcome.error, error: true })
+                    <>
+                      <SettingRow
+                        label={
+                          <span className="settings-status-label">
+                            <span className={`settings-dot${computer.available ? ' is-ok' : ' is-off'}`} />
+                            {computer.available ? 'Host backend ready' : 'Host backend unavailable'}
+                          </span>
+                        }
+                        description={
+                          computer.available
+                            ? capabilities || 'Ready'
+                            : (computer.reason ?? 'Required host services not detected.')
+                        }
+                      >
+                        <div className="settings-inline-actions">
+                          {setupHelp && onStartSession && (
+                            <button
+                              className="button primary settings-btn-sm"
+                              type="button"
+                              disabled={startingHelp}
+                              onClick={async () => {
+                                setStartingHelp(true)
+                                try {
+                                  const outcome = await onStartSession(setupHelp.prompt)
+                                  if (!outcome.ok && outcome.error) {
+                                    setNotice({ text: outcome.error, error: true })
+                                  }
+                                } catch (error) {
+                                  setNotice({ text: message(error), error: true })
+                                } finally {
+                                  setStartingHelp(false)
                                 }
+                              }}
+                            >
+                              {startingHelp ? 'Opening…' : setupHelp.label}
+                            </button>
+                          )}
+                          <button
+                            className="button settings-btn-sm"
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const next = await api<ComputerStatus>('computer-status')
+                                setData((cur) => (cur ? { ...cur, computer: next } : cur))
+                                setNotice({ text: `Computer Use status: ${next.summary}`, error: !next.available })
                               } catch (error) {
                                 setNotice({ text: message(error), error: true })
-                              } finally {
-                                setStartingHelp(false)
                               }
                             }}
                           >
-                            {startingHelp ? 'Opening…' : setupHelp.label}
+                            Check status
                           </button>
-                        )}
-                        <button
-                          className="button settings-btn-sm"
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const next = await api<ComputerStatus>('computer-status')
-                              setData((cur) => (cur ? { ...cur, computer: next } : cur))
-                              setNotice({ text: `Computer Use status: ${next.summary}`, error: !next.available })
-                            } catch (error) {
-                              setNotice({ text: message(error), error: true })
+                        </div>
+                      </SettingRow>
+                      {(computer.limitations.length > 0 || computer.sdkVersion) && (
+                        <div className="settings-row settings-row-stack">
+                          <Disclosure
+                            label="Diagnostics"
+                            meta={
+                              computer.limitations.length > 0
+                                ? `${computer.limitations.length} limitation${computer.limitations.length === 1 ? '' : 's'}`
+                                : computer.sdkVersion ? `SDK ${computer.sdkVersion}` : undefined
                             }
-                          }}
-                        >
-                          Check status
-                        </button>
-                      </div>
-                    </SettingRow>
+                          >
+                            <div className="settings-subfields">
+                              <p className="settings-row-desc">{computer.summary}</p>
+                              {computer.limitations.map((limitation) => (
+                                <p className="settings-row-desc" key={limitation}>{limitation}</p>
+                              ))}
+                            </div>
+                          </Disclosure>
+                        </div>
+                      )}
+                    </>
                   )
                 })()}
               </SettingsGroup>
-
-              <SettingsGroup
-                title="MCP servers"
-                action={<button className="button settings-btn-sm" type="button" onClick={() => void reloadMcp()}>Reload mcp.json</button>}
-                footer={<>Configured in <code className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</code>. Save changes does not touch this file.</>}
-              >
-                {mcp?.error && (
-                  <div className="settings-row">
-                    <p className="settings-row-desc settings-error-text">{mcp.error}</p>
-                  </div>
-                )}
-                {!mcp ? (
-                  <div className="settings-row"><p className="settings-empty-inline">Reading…</p></div>
-                ) : mcp.servers.length === 0 ? (
-                  <div className="settings-row"><p className="settings-empty-inline">No external tool servers configured.</p></div>
-                ) : (
-                  mcp.servers.map((server) => (
-                    <SettingRow
-                      key={server.name}
-                      label={
-                        <span className="settings-status-label">
-                          <span className={`settings-dot${!server.enabled ? ' is-off' : server.state === 'ready' ? ' is-ok' : server.state === 'failed' ? ' is-err' : ' is-warn'}`} />
-                          {server.name}
-                        </span>
-                      }
-                      description={
-                        <>
-                          <code className="mono">{server.command}</code>
-                          {' · '}
-                          {describeMcpServer(server)}
-                          {server.error ? ` · ${server.error}` : ''}
-                        </>
-                      }
-                    >
-                      <div className="settings-inline-actions">
-                        <button className="button settings-btn-sm" type="button" disabled={!server.enabled} onClick={() => void startJob('mcp-check', { name: server.name })}>Check</button>
-                        <button className="button settings-btn-sm" type="button" onClick={() => void toggleMcpServer(server.name, !server.enabled)}>{server.enabled ? 'Disable' : 'Enable'}</button>
-                      </div>
-                    </SettingRow>
-                  ))
-                )}
-              </SettingsGroup>
             </div>
+          </Section>
+
+          {/* ── MCP ──────────────────────────────────────────────────── */}
+          <Section title="MCP" description="External tool servers connected over Model Context Protocol." active={current === 'mcp'}>
+            <SettingsGroup
+              title="Configured servers"
+              meta={mcp ? `${mcp.servers.length}` : undefined}
+              action={<button className="button settings-btn-sm" type="button" onClick={() => void reloadMcp()}>Reload mcp.json</button>}
+              footer={<>Configured in <code className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</code>. Save changes does not touch this file.</>}
+            >
+              {mcp?.error && (
+                <div className="settings-row">
+                  <p className="settings-row-desc settings-error-text">{mcp.error}</p>
+                </div>
+              )}
+              {!mcp ? (
+                <div className="settings-row"><p className="settings-empty-inline">Reading…</p></div>
+              ) : mcp.servers.length === 0 ? (
+                <div className="settings-row"><p className="settings-empty-inline">No external tool servers configured.</p></div>
+              ) : (
+                mcp.servers.map((server) => (
+                  <SettingRow
+                    key={server.name}
+                    label={
+                      <span className="settings-status-label">
+                        <span className={`settings-dot${!server.enabled ? ' is-off' : server.state === 'ready' ? ' is-ok' : server.state === 'failed' ? ' is-err' : ' is-warn'}`} />
+                        {server.name}
+                      </span>
+                    }
+                    description={
+                      <>
+                        <code className="mono">{server.command}</code>
+                        {' · '}
+                        {describeMcpServer(server)}
+                        {server.error ? ` · ${server.error}` : ''}
+                      </>
+                    }
+                  >
+                    <div className="settings-inline-actions">
+                      <button className="button settings-btn-sm" type="button" disabled={!server.enabled} onClick={() => void startJob('mcp-check', { name: server.name })}>Check</button>
+                      <button className="button settings-btn-sm" type="button" onClick={() => void toggleMcpServer(server.name, !server.enabled)}>{server.enabled ? 'Disable' : 'Enable'}</button>
+                    </div>
+                  </SettingRow>
+                ))
+              )}
+            </SettingsGroup>
           </Section>
 
           {/* ── Skills ───────────────────────────────────────────────── */}
@@ -1720,18 +1753,19 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
           </Section>
 
         </div>
-        {sectionDirty && (
-          <div className="settings-save">
-            <span className="settings-save-status">
-              <span className="settings-index-dirty-dot" />
-              Unsaved changes
-            </span>
-            <div className="save-actions">
-              <button className="button settings-btn-sm" type="button" disabled={saving} onClick={discardCurrent}>Discard</button>
-              <button className="button primary settings-btn-sm" type="button" disabled={saving} onClick={() => void saveCurrent()}>{saving ? 'Saving…' : 'Save changes'}</button>
-            </div>
+        <div
+          className={`settings-save${sectionDirty ? ' is-visible' : ''}`}
+          aria-hidden={!sectionDirty}
+        >
+          <span className="settings-save-status">
+            <span className="settings-index-dirty-dot" />
+            Unsaved changes
+          </span>
+          <div className="save-actions">
+            <button className="button settings-save-discard" type="button" tabIndex={sectionDirty ? undefined : -1} disabled={!sectionDirty || saving} onClick={discardCurrent}>Discard</button>
+            <button className="button primary settings-btn-sm" type="button" tabIndex={sectionDirty ? undefined : -1} disabled={!sectionDirty || saving} onClick={() => void saveCurrent()}>{saving ? 'Saving…' : 'Save changes'}</button>
           </div>
-        )}
+        </div>
       </div>}
     </div>}
   </div>
