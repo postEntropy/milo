@@ -1,6 +1,8 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createOllama, createOpenAiEmbeddings, InputRefusedError } from '../src/core/memory/embed.js'
+import { MemorySchema } from '../src/core/config/schema.js'
+import { embedderFor } from '../src/core/memory/index.js'
 
 let open: Server | null = null
 
@@ -87,6 +89,19 @@ describe('the Ollama embedder', () => {
 })
 
 describe('the hosted embedder', () => {
+  it('uses the new default for new and previously configured OpenRouter embeddings', () => {
+    const model = 'nvidia/nemotron-3.5-embed-8b:free'
+    for (const embedding of [
+      { provider: 'openrouter' },
+      { provider: 'openrouter', model: 'nvidia/nemotron-3-embed-1b:free' },
+    ]) {
+      const config = MemorySchema.parse({ embedding })
+      expect(embedderFor(config.embedding, 'key')?.model).toBe(model)
+    }
+    const custom = MemorySchema.parse({ embedding: { provider: 'openrouter', model: 'custom/model' } })
+    expect(embedderFor(custom.embedding, 'key')?.model).toBe('custom/model')
+  })
+
   it('sends the key and reads the OpenAI-shaped reply', async () => {
     const provider = await fakeProvider(() => ({ status: 200, body: { data: [{ embedding: [0, 5] }] } }))
     const embedder = createOpenAiEmbeddings({

@@ -44,13 +44,8 @@ export type EmbedProvider = (typeof EMBED_PROVIDERS)[number]
  */
 export const DEFAULT_LOCAL_EMBED_MODEL = 'embeddinggemma'
 
-/**
- * The hosted default: free, roomy, and the better of the two free routes when
- * measured — 8 notes, 32 questions: it answered 20 of 24 matching questions
- * against 18 for the 350M one, and its 32,768-token context takes a pasted turn
- * whole where the other refuses past 512.
- */
-export const DEFAULT_CLOUD_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b:free'
+/** The hosted default on OpenRouter. */
+export const DEFAULT_CLOUD_EMBED_MODEL = 'nvidia/nemotron-3.5-embed-8b:free'
 
 export const OLLAMA_URL = 'http://127.0.0.1:11434'
 export const OPENROUTER_URL = 'https://openrouter.ai/api/v1'
@@ -84,6 +79,11 @@ export const MemorySchema = z.object({
       model: z.string().optional(),
       url: z.string().optional(),
     })
+    .transform((embedding) =>
+      embedding.provider === 'openrouter' && embedding.model === 'nvidia/nemotron-3-embed-1b:free'
+        ? { ...embedding, model: DEFAULT_CLOUD_EMBED_MODEL }
+        : embedding,
+    )
     .optional(),
 })
 export type MemoryConfig = z.infer<typeof MemorySchema>

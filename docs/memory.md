@@ -41,7 +41,7 @@ above it. There is deliberately **no similarity cutoff**. Two ways to get a mode
 - **On this machine.** Milo downloads its own Ollama build into `~/.milo/embed`, checked against the
   published sha256, and starts it on a private port with `embeddinggemma` (593 MB); it dies with the
   Milo process. An engine Milo did not start is never touched.
-- **On OpenRouter.** `nvidia/nemotron-3-embed-1b:free` by default, with the key from the same
+- **On OpenRouter.** `nvidia/nemotron-3.5-embed-8b:free` by default, with the key from the same
   `auth.json` slot the chat models use. The notes leave the machine and its 512-token context truncates
   a long pasted turn.
 
