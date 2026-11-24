@@ -17,6 +17,16 @@ final class AppModel {
         case chat(Account)
     }
 
+    enum WaitPhase: Equatable {
+        case waitingResponse
+        case thinking
+        case writing
+        case tool
+        case waiting
+        case compacting
+        case waitingJob
+    }
+
     struct Message: Identifiable, Equatable {
         let id = UUID()
         let isUser: Bool
@@ -30,11 +40,10 @@ final class AppModel {
         var streaming: Bool
         /// How long the turn thought, said once when it is over.
         var thought: Double?
-        /// Whether the turn is waiting for the model's next output — what the wait line is
-        /// drawn from. Words end the wait, a call running takes the line's place, and the
-        /// model thinking about a result starts it again: the browser reads the same turn
-        /// the same way, so neither surface goes quiet where the other is lit.
-        var waiting = false
+        /// Observable phase of an active turn on this message, `nil` once settled.
+        var waitPhase: WaitPhase? = nil
+        /// True when reasoning occurred without measurable start/end boundaries.
+        var hasUnobservedReasoning = false
         /// A line the turn leaves behind — a wait, a rebase, a stop — drawn where the
         /// reply lands.
         var status: String? = nil
@@ -63,7 +72,8 @@ final class AppModel {
             lhs.id == rhs.id
                 && lhs.isUser == rhs.isUser
                 && lhs.streaming == rhs.streaming
-                && lhs.waiting == rhs.waiting
+                && lhs.waitPhase == rhs.waitPhase
+                && lhs.hasUnobservedReasoning == rhs.hasUnobservedReasoning
                 && lhs.thought == rhs.thought
                 && lhs.status == rhs.status
                 && lhs.deliveryId == rhs.deliveryId
@@ -380,7 +390,6 @@ final class AppModel {
     var pairing = false
 
     private let client = MiloClient()
-    private var turnStarted: Date?
     /// Whether the turn in flight has announced its first output yet, so the beginning
     /// is said once however many pieces arrive.
     private var began = false
@@ -405,6 +414,9 @@ final class AppModel {
         owedMentions = []
     }
     private var reopening = false
+    private var creatingSession = false
+    private var sessionTransitionEpoch = 0
+    private var preservedNoteOnNextReady: Note?
     private var started = false
     private var pendingRestoreSessionId: String?
     private var restoringSession = false
@@ -618,6 +630,8 @@ final class AppModel {
         do {
             try await MiloApi.resumeSession(next, id: id)
             guard epoch == restorationEpoch, pendingRestoreSessionId == id else { return .superseded }
+            sessionTransitionEpoch += 1
+            preservedNoteOnNextReady = nil
             pendingRestoreSessionId = nil
             AccountStore.save(next)
             AccountStore.lastSessionId = id
@@ -634,14 +648,19 @@ final class AppModel {
     }
 
     private func openInitialFreshSession(at account: Account) async {
+        sessionTransitionEpoch += 1
+        let epoch = sessionTransitionEpoch
+        preservedNoteOnNextReady = nil
         reopening = true
         var next = account
         next.chatId = AccountStore.freshChatId()
         do {
             try await MiloApi.newSession(next)
+            guard epoch == sessionTransitionEpoch else { return }
             AccountStore.save(next)
             phase = .chat(next)
         } catch {
+            guard epoch == sessionTransitionEpoch else { return }
             if case ApiError.unreachable = error { connectionSaid = true }
             else { failed(error) }
             // The socket is opened either way: a daemon that could not start a session
@@ -770,6 +789,9 @@ final class AppModel {
         modelsError = nil
         modelName = ""
         providerId = ""
+        sessionTransitionEpoch += 1
+        pendingRestoreSessionId = nil
+        preservedNoteOnNextReady = nil
         phase = .pairing
         // Nothing is running for this phone any more, so the system's hold on the turn goes
         // with the install rather than keeping the phone awake for a daemon it has left.
@@ -1188,7 +1210,9 @@ final class AppModel {
     }
 
     private func startFreshSession(prompt: String?) async -> Bool {
-        guard let account else { return false }
+        guard let account, !creatingSession else { return false }
+        creatingSession = true
+        defer { creatingSession = false }
         cancelPendingRestoration()
         // Clear the screen in the same frame the person pressed New session, so the old
         // thread does not linger while the drawer closes and the keyboard rises.
@@ -1196,16 +1220,23 @@ final class AppModel {
         clearOwed()
         owed = prompt
         resetSessionState()
-        let opened = await openFresh(account) {
-            let id = try await MiloApi.newSession($0)
+        let outcome = await openFreshOutcome(account, bind: {
+            try await MiloApi.newSession($0)
+        }, afterBind: { id in
             if prompt != nil { owedSessionId = id }
-        }
-        if !opened {
+        })
+        switch outcome {
+        case .opened:
+            return true
+        case .failed:
             reopening = false
             clearOwed()
+            preservedNoteOnNextReady = note
             client.connect(to: account)
+            return false
+        case .superseded:
+            return false
         }
-        return opened
     }
 
     @discardableResult
@@ -1258,19 +1289,39 @@ final class AppModel {
      taken it, so a call that fails leaves the phone where it was — and answers whether it
      opened, which is what tells a caller the phone moved at all.
      */
+    private enum OpenFreshOutcome {
+        case opened
+        case failed
+        case superseded
+    }
+
     @discardableResult
     private func openFresh(_ account: Account, bind: (Account) async throws -> Void) async -> Bool {
+        await openFreshOutcome(account, bind: bind, afterBind: { _ in }) == .opened
+    }
+
+    private func openFreshOutcome<T>(
+        _ account: Account,
+        bind: (Account) async throws -> T,
+        afterBind: (T) -> Void
+    ) async -> OpenFreshOutcome {
+        sessionTransitionEpoch += 1
+        let epoch = sessionTransitionEpoch
+        preservedNoteOnNextReady = nil
         var next = account
         next.chatId = AccountStore.freshChatId()
         do {
-            try await bind(next)
+            let bound = try await bind(next)
+            guard epoch == sessionTransitionEpoch else { return .superseded }
+            afterBind(bound)
             AccountStore.save(next)
             phase = .chat(next)
             await reopen(next)
-            return true
+            return .opened
         } catch {
+            guard epoch == sessionTransitionEpoch else { return .superseded }
             failed(error)
-            return false
+            return .failed
         }
     }
 
@@ -1286,6 +1337,8 @@ final class AppModel {
                 AccountStore.lastSessionId = nil
             }
             if id == sessionId {
+                sessionTransitionEpoch += 1
+                preservedNoteOnNextReady = nil
                 cancelPendingRestoration()
                 // Onto a fresh conversation, so the move lands even while a turn runs
                 // on the session being left.
@@ -1398,6 +1451,9 @@ final class AppModel {
     @discardableResult
     private func fork(from turn: Int, then prompt: String?, mentions: [MessageMentionRef] = []) async -> Bool {
         guard let account, !sessionId.isEmpty else { return false }
+        sessionTransitionEpoch += 1
+        let epoch = sessionTransitionEpoch
+        preservedNoteOnNextReady = nil
         cancelPendingRestoration()
         let from = sessionId
         clearOwed()
@@ -1407,11 +1463,13 @@ final class AppModel {
         next.chatId = AccountStore.freshChatId()
         do {
             try await MiloApi.forkSession(next, id: from, upToTurn: turn)
+            guard epoch == sessionTransitionEpoch else { return false }
             AccountStore.save(next)
             phase = .chat(next)
             await reopen(next)
             return true
         } catch {
+            guard epoch == sessionTransitionEpoch else { return false }
             clearOwed()
             failed(error)
             return false
@@ -1439,7 +1497,6 @@ final class AppModel {
             sessionBackend = nil
         }
         pending = nil
-        turnStarted = nil
         began = false
         busy = false
         planMode = false
@@ -2721,6 +2778,7 @@ final class AppModel {
     /// event or when the app comes back.
     private struct PendingStreamDelta {
         let reasoning: Bool
+        let replayed: Bool
         var text: String
     }
     private var pendingStreamDeltas: [PendingStreamDelta] = []
@@ -2864,7 +2922,11 @@ final class AppModel {
                     Task { await markSeen(ready.sessionId) }
                 }
             }
-            note = nil
+            let preserved = preservedNoteOnNextReady
+            preservedNoteOnNextReady = nil
+            if preserved == nil || note != preserved {
+                note = nil
+            }
             pending = nil
             queued = 0
             // The jobs running when this screen opened: the strip is drawn from the
@@ -2876,14 +2938,13 @@ final class AppModel {
             // reload therefore brings a panel back the way it was left, never opening one
             // nobody asked for — the browser's own rule, for the browser's own reason.
             panel = ready.panel
-            turnStarted = nil
             began = false
             // A turn still being written when this screen opened: its `turn-start`
             // arrived before the app was listening, so the row it is writing into is
             // opened here and the events still to come land in it. No thought time is
             // claimed — this app watched none of that thinking.
             if ready.activeTurn != nil {
-                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
+                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waitPhase: .waitingResponse))
             }
             // The words a fork or an early send owes go out now that the socket is ready,
             // with the names of whatever files it carried.
@@ -2920,7 +2981,7 @@ final class AppModel {
             // they happened — above a turn that is still running, so the turn keeps the end
             // of the thread where it is being written.
             let rows = chunk.map(row)
-            if let last = messages.last, last.waiting {
+            if let last = messages.last, last.waitPhase != nil {
                 messages.insert(contentsOf: rows, at: messages.count - 1)
             } else {
                 messages.append(contentsOf: rows)
@@ -2930,9 +2991,8 @@ final class AppModel {
             busy = true
             began = false
             turnSawBotStart = false
-            turnStarted = Date()
             withAnimation(SettlesIn.motion) {
-                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
+                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waitPhase: .waitingResponse))
             }
         case .event(_, let event, let says):
             apply(event, says: says)
@@ -2967,7 +3027,12 @@ final class AppModel {
             var saidWhy = false
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
-                messages[index].waiting = false
+                if messages[index].waitPhase == .thinking {
+                    AppModel.invalidateDuration(&messages[index], nextPhase: nil)
+                } else {
+                    messages[index].waitPhase = nil
+                }
+                messages[index].thought = AppModel.finalizedThought(messages[index])
                 // A call left marked running never heard back from; the line stops
                 // saying it is underway rather than guessing how it went.
                 messages[index].parts = AppModel.settled(messages[index].parts)
@@ -2977,7 +3042,6 @@ final class AppModel {
                 saidWhy = messages[index].status != nil
                 answered = messages[index].prose
             }
-            turnStarted = nil
             // The row keeps the provider's reason; a generic toast over it would be
             // the screen saying less than the message behind it.
             if status == "error", !saidWhy, messages.last?.error == nil { note = Note("That turn ended in an error.") }
@@ -3094,23 +3158,28 @@ final class AppModel {
     /// exact. The daemon remains the source of truth if iOS suspends the app before a flush.
     private func deferStreamDelta(_ event: AgentEvent) -> Bool {
         let reasoning: Bool
+        let replayed: Bool
         let text: String
         switch event {
         case .textDelta(let delta):
             reasoning = false
+            replayed = false
             text = delta
-        case .reasoningDelta(let delta):
+        case .reasoningDelta(let delta, let isReplayed):
             reasoning = true
+            replayed = isReplayed
             text = delta
         default:
             return false
         }
 
         continuedTurn.advance()
-        if pendingStreamDeltas.last?.reasoning == reasoning {
+        if let last = pendingStreamDeltas.last,
+           last.reasoning == reasoning,
+           last.replayed == replayed {
             pendingStreamDeltas[pendingStreamDeltas.count - 1].text += text
         } else {
-            pendingStreamDeltas.append(PendingStreamDelta(reasoning: reasoning, text: text))
+            pendingStreamDeltas.append(PendingStreamDelta(reasoning: reasoning, replayed: replayed, text: text))
         }
         return true
     }
@@ -3122,24 +3191,33 @@ final class AppModel {
         let pending = pendingStreamDeltas
         pendingStreamDeltas.removeAll(keepingCapacity: true)
         for delta in pending {
-            apply(delta.reasoning ? .reasoningDelta(delta.text) : .textDelta(delta.text), says: nil)
+            apply(delta.reasoning ? .reasoningDelta(delta.text, replayed: delta.replayed) : .textDelta(delta.text), says: nil)
         }
     }
 
-    /// The turn's first output. The haptic waits for this rather than the send or the
-    /// daemon's `turn-start`, so the tap lands when Milo actually starts — said once,
-    /// whichever piece of the answer arrives first.
+    private static func invalidateDuration(_ message: inout Message, nextPhase: WaitPhase?) {
+        message.waitPhase = nextPhase
+        message.thought = nil
+        message.hasUnobservedReasoning = true
+    }
+
+    private static func transitionNonThinking(_ message: inout Message, to nextPhase: WaitPhase) {
+        if message.waitPhase == .thinking {
+            invalidateDuration(&message, nextPhase: nextPhase)
+        } else {
+            message.waitPhase = nextPhase
+        }
+    }
+
+    private static func finalizedThought(_ message: Message) -> Double? {
+        guard !message.hasUnobservedReasoning, let thought = message.thought, thought >= 1 else { return nil }
+        return thought
+    }
+
     private func beganSpeaking() {
         guard !began else { return }
         began = true
         answerBegan += 1
-        // How long the turn waited to say anything, written the moment it does: it is
-        // what the line over its thought reports, and it is the same wait a session read
-        // back carries — the whole turn's own length is a different, longer number.
-        if let waited = turnStarted.map({ Date().timeIntervalSince($0) }),
-           let index = messages.lastIndex(where: { $0.streaming }) {
-            messages[index].thought = waited
-        }
     }
 
     private func apply(_ event: AgentEvent, says: String?) {
@@ -3147,12 +3225,37 @@ final class AppModel {
         // hold on the turn is that the work is moving, not what moved.
         continuedTurn.advance()
         switch event {
+        case .responseWaiting:
+            mutatingLast {
+                AppModel.transitionNonThinking(&$0, to: .waitingResponse)
+                $0.status = nil
+            }
+        case .reasoningStart:
+            beganSpeaking()
+            mutatingLast {
+                $0.waitPhase = .thinking
+                $0.status = nil
+            }
+        case .reasoningEnd(let ms):
+            mutatingLast { message in
+                let nextPhase: WaitPhase? = message.waitPhase == .thinking ? .waitingResponse : message.waitPhase
+                if let ms, ms >= 0 {
+                    message.waitPhase = nextPhase
+                    if message.hasUnobservedReasoning {
+                        message.thought = nil
+                    } else {
+                        message.thought = (message.thought ?? 0) + (ms / 1000)
+                    }
+                } else {
+                    AppModel.invalidateDuration(&message, nextPhase: nextPhase)
+                }
+            }
         case .textDelta(let delta):
             beganSpeaking()
             append(delta, reasoning: false)
-        case .reasoningDelta(let delta):
-            beganSpeaking()
-            append(delta, reasoning: true)
+        case .reasoningDelta(let delta, let replayed):
+            if !replayed { beganSpeaking() }
+            append(delta, reasoning: true, replayed: replayed)
         case .toolStart(_, let name, let text, let input):
             beganSpeaking()
             // `text` is the server's own line (name and the one value worth showing),
@@ -3160,7 +3263,8 @@ final class AppModel {
             // The call's own line is what says the turn is working from here, so the wait
             // for the model's next output is over until the call comes back.
             mutatingLast { message in
-                message.waiting = false
+                AppModel.transitionNonThinking(&message, to: .tool)
+                message.status = nil
                 message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running", input: input)))
             }
             if name == "task" {
@@ -3195,9 +3299,8 @@ final class AppModel {
             if name == "task" {
                 Task { await refreshCrewBots() }
             }
-            // The result is in, so the model is thinking again about what to do with it:
-            // the wait line comes back, which is the browser's own reading of this moment.
-            mutatingLast { $0.waiting = true }
+            // The result is in, so wait for the model's next output or reasoning signal.
+            mutatingLast { AppModel.transitionNonThinking(&$0, to: .waitingResponse) }
         case .todo(let items):
             beganSpeaking()
             mutateLast { parts in
@@ -3214,16 +3317,16 @@ final class AppModel {
             if !turnSawBotStart, let index = messages.lastIndex(where: { $0.streaming }) {
                 turnSawBotStart = true
                 messages[index].bot = bot
-                messages[index].waiting = true
+                messages[index].waitPhase = .waitingResponse
             } else {
                 if let prev = messages.lastIndex(where: { $0.streaming }) {
                     messages[prev].streaming = false
-                    messages[prev].waiting = false
+                    messages[prev].waitPhase = nil
+                    messages[prev].thought = AppModel.finalizedThought(messages[prev])
                     messages[prev].parts = AppModel.settled(messages[prev].parts)
                 }
                 turnSawBotStart = true
                 began = false
-                turnStarted = Date()
                 withAnimation(SettlesIn.motion) {
                     messages.append(
                         Message(
@@ -3232,7 +3335,7 @@ final class AppModel {
                             attachments: [],
                             streaming: true,
                             thought: nil,
-                            waiting: true,
+                            waitPhase: .waitingResponse,
                             bot: bot
                         )
                     )
@@ -3240,7 +3343,12 @@ final class AppModel {
             }
         case .botEnd(let bot, let status, let error):
             if let index = messages.lastIndex(where: { $0.streaming && $0.bot?.id == bot.id }) {
-                messages[index].waiting = false
+                if messages[index].waitPhase == .thinking {
+                    AppModel.invalidateDuration(&messages[index], nextPhase: nil)
+                } else {
+                    messages[index].waitPhase = nil
+                }
+                messages[index].thought = AppModel.finalizedThought(messages[index])
                 messages[index].parts = AppModel.settled(messages[index].parts)
                 if status == "error", let error {
                     messages[index].error = error
@@ -3251,16 +3359,58 @@ final class AppModel {
             // A widget arrives many times over as the model writes it: each draft takes
             // the place of the one before it, and the closed block takes the last draft's.
             mutateLast { parts in AppModel.place(widget: widget, draft: draft, in: &parts) }
+            if draft {
+                mutatingLast {
+                    AppModel.transitionNonThinking(&$0, to: .writing)
+                    $0.status = nil
+                }
+            }
         case .usage(let input, let output):
             mutatingLast { $0.tokens = (input, output) }
         // The words a turn's own row shows are the daemon's, arriving with the frame: the
         // phone wrote them itself until its copy of them drifted from the browser's, and a
         // sentence written twice is a sentence that drifts. A step with nothing to say about
         // the row leaves the line that is already there.
-        case .waiting, .waited, .compacting, .compacted, .rebased, .steer, .done:
+        case .waiting:
+            mutatingLast {
+                AppModel.transitionNonThinking(&$0, to: .waiting)
+                if let says { $0.status = says }
+            }
+        case .compacting:
+            mutatingLast {
+                AppModel.transitionNonThinking(&$0, to: .compacting)
+                if let says { $0.status = says }
+            }
+        case .jobWaiting:
+            mutatingLast {
+                AppModel.transitionNonThinking(&$0, to: .waitingJob)
+                if let says { $0.status = says }
+            }
+        case .waited, .compacted, .jobWaited, .steer:
+            mutatingLast {
+                AppModel.transitionNonThinking(&$0, to: .waitingResponse)
+                $0.status = nil
+            }
+        case .rebased:
             if let says { mutatingLast { $0.status = says } }
+        case .done:
+            mutatingLast {
+                if $0.waitPhase == .thinking {
+                    AppModel.invalidateDuration(&$0, nextPhase: nil)
+                } else {
+                    $0.waitPhase = nil
+                }
+                $0.thought = AppModel.finalizedThought($0)
+                if let says { $0.status = says }
+            }
         case .aborted:
             mutatingLast {
+                if $0.waitPhase == .thinking {
+                    AppModel.invalidateDuration(&$0, nextPhase: nil)
+                } else {
+                    $0.waitPhase = nil
+                }
+                $0.thought = AppModel.finalizedThought($0)
                 if let says { $0.status = says }
                 $0.parts = AppModel.settled($0.parts)
             }
@@ -3269,22 +3419,41 @@ final class AppModel {
             // lives for nine seconds and leaves a blank bubble is a failure that looks
             // like nothing happened. The daemon writes the same words down, so a
             // reopened conversation still says it.
-            if let says { mutatingLast { $0.status = says } }
+            mutatingLast {
+                if $0.waitPhase == .thinking {
+                    AppModel.invalidateDuration(&$0, nextPhase: nil)
+                } else {
+                    $0.waitPhase = nil
+                }
+                $0.thought = AppModel.finalizedThought($0)
+                if let says { $0.status = says }
+                $0.parts = AppModel.settled($0.parts)
+            }
             note = Note(message)
         case .other:
             break
         }
     }
 
-    private func append(_ delta: String, reasoning: Bool) {
+    private func append(_ delta: String, reasoning: Bool, replayed: Bool = false) {
         mutatingLast { message in
             var parts = message.parts
             // Words arriving mean the block being written was not a widget after all — its
             // draft goes, rather than sitting above the words it is not — and they end the
-            // wait line's wait. Thinking is what fills that wait, so a reasoning delta is
-            // the same wait still running.
-            if !reasoning {
-                message.waiting = false
+            // wait line's wait.
+            if reasoning {
+                if replayed {
+                    message.thought = nil
+                    message.hasUnobservedReasoning = true
+                } else {
+                    if message.waitPhase != .thinking {
+                        AppModel.invalidateDuration(&message, nextPhase: .thinking)
+                    }
+                    message.status = nil
+                }
+            } else {
+                AppModel.transitionNonThinking(&message, to: .writing)
+                message.status = nil
                 parts = AppModel.droppingDraft(parts)
             }
             switch (reasoning, parts.last) {

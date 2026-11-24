@@ -40,6 +40,7 @@ struct ChatView: View {
     let settingsOpen: Bool
     let onOpenSettings: () -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var pickedMentions: [PickedMention] = []
     @State private var draftSession = ""
@@ -422,9 +423,27 @@ struct ChatView: View {
                     // finger crossed is still asked whether it was pressed — and it is the
                     // card's claim, still standing here, that says it was not. Cleared a turn
                     // later, once this touch-up has been answered and no press can follow it.
-                    Task { @MainActor in held = nil }
+                    Task { @MainActor in
+                        guard !touching else { return }
+                        held = nil
+                    }
                 }
         )
+        .onChange(of: touching) { _, isTouching in
+            guard !isTouching else { return }
+            // If the system cancelled the drag instead of calling `onEnded`, `@GestureState`
+            // still resets `touching` to false. Defer cleanup one turn — matching `onEnded` —
+            // so a simultaneous tap on touch-up stays blocked, while a cancelled swipe cannot
+            // leave `held == true` or `drag != 0` behind.
+            Task { @MainActor in
+                guard !touching else { return }
+                book.touch = nil
+                if held != nil { held = nil }
+                if drag != 0 {
+                    withAnimation(Self.lidMove) { drag = 0 }
+                }
+            }
+        }
         .onPreferenceChange(SidewaysDragKey.self) { sideways.frames = $0 }
         // The screen's own share, which is what the panel's width is a fraction of: measured
         // rather than assumed, so the same screen reads right whichever phone or tablet it is.
@@ -658,6 +677,7 @@ struct ChatView: View {
     }
 
     private func startSessionFromDrawer() {
+        guard !starting else { return }
         // Inside the tap that asked for it, before the session moves: the cursor is in the
         // field the press just opened, so the next thing said is typed rather than looked
         // for. The browser's own new session takes focus the same way.
@@ -1076,6 +1096,31 @@ struct ChatView: View {
                     }
                 }
             }
+            // Returning to the app lands at the end of the active session so anything
+            // that arrived while the phone was away is immediately in view.
+            .onChange(of: scenePhase) { oldPhase, phase in
+                guard phase == .active, oldPhase != .active, isActiveTab else { return }
+                book.moving = false
+                following = true
+                placed = true
+                guard !model.messages.isEmpty else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    guard !book.moving, following, !model.messages.isEmpty else { return }
+                    proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+                }
+            }
+            // If reconnecting after returning to the app replays new messages while
+            // following the end, keep the newest content in view.
+            .onChange(of: model.messages.count) { _, _ in
+                guard following, !book.moving, placed, room <= 1 else { return }
+                guard !(model.messages.last?.isUser == true) else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    guard following, !book.moving, !model.messages.isEmpty else { return }
+                    proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+                }
+            }
             .safeAreaInset(edge: .top, spacing: 0) {
                 topbar
                     // How tall the bar came out, so the line under it knows where it starts.
@@ -1389,6 +1434,7 @@ struct WelcomeView: View {
     let typing: Bool
     let availableHeight: CGFloat
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pressCount = 0
 

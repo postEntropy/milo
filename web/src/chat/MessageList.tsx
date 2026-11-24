@@ -5,7 +5,7 @@ import { formatSeconds } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { BotAuthor, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptPart } from '@protocol'
-import { proseOf } from '@protocol'
+import { proseOf, waitIndicator } from '../../../src/gateways/web/protocol.ts'
 import type { RoutineDelivery } from '../../../src/core/outgoing.ts'
 import { toolBrand, toolParts, changeTotals } from '../../../src/gateways/tool-line.ts'
 import type { FileChange } from '../../../src/core/change.ts'
@@ -461,7 +461,7 @@ export const MessageList = memo(function MessageList({
     if (m.role === 'user' && !m.delivery) currentTurn++
     messageTurns.set(m.id, currentTurn)
     if (hasContent(m)) visibleMessages.push(m)
-    if (m.role === 'assistant' && !m.routine && proseOf(m) && m.waitingSince === undefined) lastAssistant = m
+    if (m.role === 'assistant' && !m.routine && proseOf(m) && !waitIndicator(m.waitPhase)) lastAssistant = m
     if (m.role === 'user' && !m.delivery) lastUser = m
     if (busy && m.role === 'assistant') runningId = m.id
   }
@@ -606,6 +606,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, crew
   // settle-in time belongs to the turn's first thought, wherever the thread lands.
   const firstReasoning = keyed.find(({ part }) => part.kind === 'reasoning')?.key
   const prose = proseOf(message)
+  const waiting = waitIndicator(message.waitPhase)
   // What the message draws, wherever it is placed: a routine's delivery puts all of
   // it inside the card that signs it, and every other message draws it as it is.
   const body = <>
@@ -633,7 +634,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, crew
     {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
     {message.error && <div className="message-bot-error" role="alert">{message.error}</div>}
   </>
-  return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}${running && message.waitingSince === undefined ? ' is-streaming' : ''}`}>
+  return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}${running && !waiting ? ' is-streaming' : ''}`}>
     <div className="message-content">
       {message.bot && !message.routine && (() => {
         const liveBot = crewBots?.find((entry) => entry.id === message.bot?.id) ?? message.bot
@@ -687,7 +688,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, crew
           ))}
         </div>
       )}
-      {message.role === 'assistant' && prose && !message.routine && message.waitingSince === undefined && !running && (
+      {message.role === 'assistant' && prose && !message.routine && !waiting && !running && (
         <div className="message-toolbar">
           <CopyButton text={prose} />
           {onRegenerate && regenPrompt !== undefined && (
@@ -705,7 +706,9 @@ const MessageRow = memo(function MessageRow({ message, thinking, sessionId, crew
           <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} raw={message.raw} rawNoOutput={message.rawNoOutput} onFork={onFork} turn={turn} busy={busy} onQuote={onQuote} />
         </div>
       )}
-      {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" icon="light" />}
+      {waiting && !drawingADraft(parts) && (
+        <WaitLine kind={waiting.kind} label={waiting.label} icon={waiting.icon} />
+      )}
       {!message.error && message.status && <div className="message-status">{message.status}</div>}
     </div>
     {message.delivery && <div className="message-delivery" role="status">
@@ -1044,7 +1047,7 @@ function hasContent(message: ChatMessage): boolean {
   if (message.attachments && message.attachments.length > 0) return true
   if (message.cards && message.cards.length > 0) return true
   if (message.actions && message.actions.length > 0) return true
-  if (message.waitingSince !== undefined) return true
+  if (message.waitPhase !== undefined) return true
   if (message.status) return true
   return false
 }

@@ -193,7 +193,7 @@ export function Shell({
     const jobs = active?.jobs
     if (!active || !jobs) return
     return jobs.onSettled((job) => {
-      if (job.origin.gateway !== 'cli' || !shouldAnnounce(job)) return
+      if (job.origin.gateway !== 'cli' || jobs.isConsumed(job.id) || !shouldAnnounce(job)) return
       void (async () => {
         setJobNotice(job.id)
         try {

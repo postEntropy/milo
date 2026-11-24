@@ -345,7 +345,6 @@ describe('SettingsScreen', () => {
     expect(readData('auth.json').providers.openrouter).toBe('sk-or-typed')
     expect(readData('config.yml').memory.embedding).toEqual({
       provider: 'openrouter',
-      model: 'nvidia/nemotron-3-embed-1b:free',
     })
   })
 
@@ -365,7 +364,6 @@ describe('SettingsScreen', () => {
 
     expect(readData('config.yml').memory.embedding).toEqual({
       provider: 'openrouter',
-      model: 'nvidia/nemotron-3-embed-1b:free',
     })
     expect(flatFrame(app)).toContain('over OpenRouter')
   })

@@ -135,14 +135,21 @@ function renderChat(runtime: AgentRuntime, options: RenderOptions = {}) {
 afterEach(() => cleanup())
 
 describe('ChatScreen', () => {
-  it('shows a thinking indicator before the first token, then the answer', async () => {
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
+  it('shows waiting before output, transitions to thinking only when signaled, then shows the answer', async () => {
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    const beforeFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const whileThinking = new Promise<void>((resolve) => {
+      releaseSecond = resolve
     })
 
     async function* stream(): AsyncGenerator<AgentEvent> {
-      await gate
+      await beforeFirst
+      yield { type: 'reasoning-start' }
+      await whileThinking
+      yield { type: 'reasoning-end', ms: 1200 }
       yield { type: 'text-delta', delta: 'Hi there' }
       yield { type: 'done', finishReason: 'stop' }
     }
@@ -150,9 +157,14 @@ describe('ChatScreen', () => {
     const { lastFrame, stdin } = renderChat(makeRuntime(stream))
 
     await submit(stdin, 'hello')
+    expect(lastFrame()).toContain('…')
+    expect(lastFrame()).not.toContain('thinking…')
+
+    releaseFirst()
+    await tick()
     expect(lastFrame()).toContain('thinking…')
 
-    release()
+    releaseSecond()
     await tick()
 
     expect(lastFrame()).toContain('Hi there')
@@ -284,21 +296,39 @@ describe('ChatScreen', () => {
     expect(lines.findIndex((line) => line.includes('› hello'))).toBeGreaterThan(4)
   })
 
-  it('says how long the model thought before the answer started', async () => {
-    async function* stream(): AsyncGenerator<AgentEvent> {
-      // A slow first token: long enough that the wait is worth reporting.
-      await tick(1100)
-      yield { type: 'text-delta', delta: 'aqui está' }
+  it('shows waiting, then thinking during a streamed reasoning block, preserves content, and never invents Thought for from client clock', async () => {
+    let releaseWait!: () => void
+    let releaseThink!: () => void
+    const waitGate = new Promise<void>((resolve) => { releaseWait = resolve })
+    const thinkGate = new Promise<void>((resolve) => { releaseThink = resolve })
+
+    async function* fullFlow(): AsyncGenerator<AgentEvent> {
+      yield { type: 'response-waiting' }
+      await waitGate
+      yield { type: 'reasoning-start' }
+      yield { type: 'reasoning-delta', delta: 'checking options carefully' }
+      await thinkGate
+      yield { type: 'reasoning-end' }
+      yield { type: 'text-delta', delta: 'pronto' }
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    const { lastFrame, stdin } = renderChat(makeRuntime(fullFlow))
     await submit(stdin, 'pensa aí')
-    await tick(1300)
+    expect(lastFrame()).toContain('…')
+    expect(lastFrame()).not.toContain('thinking…')
 
-    const frame = lastFrame() ?? ''
-    expect(frame).toContain('✻ Thought for')
-    expect(frame).toContain('aqui está')
+    releaseWait()
+    await tick()
+    expect(lastFrame()).toContain('thinking…')
+    expect(lastFrame()).toContain('checking options carefully')
+
+    await tick(1100)
+    releaseThink()
+    const frame = await waitForFrame(lastFrame, 'pronto')
+    expect(frame).toContain('checking options carefully')
+    expect(frame).toContain('pronto')
+    expect(frame).not.toContain('✻ Thought for')
   })
 
   it('names the fold while it runs, and what it saved once it is over', async () => {
@@ -373,11 +403,9 @@ describe('ChatScreen', () => {
 
   it('keeps the thought when the turn never answered', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
-      // Slow enough for the wait to be worth a line, and the tool that followed
-      // it was the turn's only other content: the thought is what was said, so
-      // it has to stay.
-      await tick(1100)
+      yield { type: 'reasoning-start' }
       yield { type: 'reasoning-delta', delta: 'o projeto chama-se milo' }
+      yield { type: 'reasoning-end', ms: 1400 }
       yield { type: 'tool-start', id: 'c1', name: 'read_file', args: { path: 'package.json' } }
       yield { type: 'tool-end', id: 'c1', name: 'read_file', result: 'ok', isError: false }
       yield { type: 'done', finishReason: 'stop' }
@@ -385,10 +413,10 @@ describe('ChatScreen', () => {
 
     const { lastFrame, stdin } = renderChat(makeRuntime(stream))
     await submit(stdin, 'o que tem no package.json?')
-    await tick(1500)
+    await tick()
 
     const frame = lastFrame() ?? ''
-    expect(frame).toContain('✻ Thought for')
+    expect(frame).toContain('✻ Thought for 1.4s')
     expect(frame).toContain('o projeto chama-se milo')
   })
 
@@ -1245,6 +1273,65 @@ describe('ChatScreen', () => {
     if (highUsage.includes('\u001b[')) {
       expect(highUsage).toContain('\u001b[38;2;218;57;47m◔ 185k/200k tok')
     }
+  })
+
+  it('returns from tool execution to subtle ellipsis waiting instead of thinking…', async () => {
+    let releaseAfterTool!: () => void
+    const afterTool = new Promise<void>((resolve) => { releaseAfterTool = resolve })
+
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: 'c1', name: 'read_file', args: { path: 'a.ts' } }
+      yield { type: 'tool-end', id: 'c1', name: 'read_file', result: 'ok', isError: false }
+      await afterTool
+      yield { type: 'text-delta', delta: 'Read it.' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'read a.ts')
+    expect(lastFrame()).toContain('…')
+    expect(lastFrame()).not.toContain('thinking…')
+
+    releaseAfterTool()
+    await waitForFrame(lastFrame, 'Read it.')
+  })
+
+  it('shows unmeasured reasoning text without inventing a Thought for duration when closed on text', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'considering trade-offs' }
+      yield { type: 'text-delta', delta: 'Use option B.' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'compare')
+    const frame = await waitForFrame(lastFrame, 'Use option B.')
+    expect(frame).toContain('considering trade-offs')
+    expect(frame).not.toContain('✻ Thought for')
+  })
+
+  it('keeps replayed post-hoc reasoning in the transcript without showing thinking… or Thought for', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => { release = resolve })
+
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'response-waiting' }
+      yield { type: 'reasoning-delta', delta: 'post-hoc summary', replayed: true }
+      await hold
+      yield { type: 'text-delta', delta: 'Final line.' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'summarize')
+    await tick()
+    expect(lastFrame()).toContain('…')
+    expect(lastFrame()).not.toContain('thinking…')
+
+    release()
+    const frame = await waitForFrame(lastFrame, 'Final line.')
+    expect(frame).toContain('post-hoc summary')
+    expect(frame).not.toContain('✻ Thought for')
   })
 })
 

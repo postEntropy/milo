@@ -293,4 +293,47 @@ describe('the popup bridge', () => {
     expect(daemon.requests.some((request) => request.url === '/api/new-session')).toBe(false)
     expect(daemon.frames.some((frame) => frame.type === 'send')).toBe(false)
   }, 20_000)
+
+  it('forwards status transitions accurately across response-waiting, reasoning-start, reasoning-end, and tool-end', async () => {
+    const port = await freePort()
+    const { child, reports, next } = bridge(port)
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+    })
+    const sockets = new WebSocketServer({ server })
+    sockets.on('connection', (socket) => {
+      socket.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Record<string, unknown>
+        if (frame.type === 'hello') {
+          socket.send(JSON.stringify({ type: 'ready', sessionId: 'session-1' }))
+        } else if (frame.type === 'send') {
+          socket.send(JSON.stringify({ type: 'turn-start', id: 'turn-1', text: frame.text, requestId: frame.requestId }))
+          socket.send(JSON.stringify({ type: 'send-result', requestId: frame.requestId, ok: true }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'response-waiting' } }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'reasoning-start' } }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'reasoning-end', ms: 1200 } }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'tool-start', id: 'c1', name: 'read_file', args: { path: 'a.ts' } } }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'tool-end', id: 'c1', name: 'read_file', result: 'ok', isError: false } }))
+          socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'text-delta', delta: 'ok' } }))
+          socket.send(JSON.stringify({ type: 'turn-end', id: 'turn-1', status: 'done' }))
+        }
+      })
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve))
+
+    await next('ready')
+    child.stdin.write(`${JSON.stringify({ type: 'ask', text: 'check status' })}\n`)
+    await next('end')
+
+    const statuses = reports
+      .filter((report): report is { type: 'status'; text: string } => report.type === 'status')
+      .map((report) => report.text)
+    expect(statuses).toEqual([
+      '…',
+      'Thinking…',
+      '…',
+      '…',
+    ])
+  }, 20_000)
 })

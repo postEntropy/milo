@@ -609,4 +609,35 @@ describe('runTurn — display settings', () => {
     expect(last).toContain('trimmed to fit')
     expect(last.endsWith('THE-ANSWER-IS-AT-THE-END')).toBe(true)
   })
+
+  it('shows a transient Thinking status only when signaled by reasoning events, never on response-waiting alone', async () => {
+    let releaseWait!: () => void
+    let releaseThink!: () => void
+    const waitGate = new Promise<void>((resolve) => { releaseWait = resolve })
+    const thinkGate = new Promise<void>((resolve) => { releaseThink = resolve })
+
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'response-waiting' }
+      await waitGate
+      yield { type: 'reasoning-start' }
+      await thinkGate
+      yield { type: 'reasoning-end', ms: 1200 }
+      yield { type: 'text-delta', delta: 'Final answer' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    const done = harness.run()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(harness.edits).toEqual(['…'])
+    expect(harness.edits).not.toContain('💭 Thinking…')
+
+    releaseWait()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(harness.edits).toContain('💭 Thinking…')
+
+    releaseThink()
+    await done
+    expect(harness.edits.at(-1)).toBe('Final answer')
+  })
 })

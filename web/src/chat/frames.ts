@@ -1,7 +1,16 @@
-import type { AgentEvent, TranscriptPart } from '@protocol'
+import type { AgentEvent, TranscriptPart, TurnWaitState } from '@protocol'
+import { finalThoughtMs, reduceTurnWaitState } from '../../../src/gateways/web/protocol.ts'
 import { drawsToolFailure, toolText } from '../../../src/gateways/tool-line.ts'
 import type { ChatMessage } from './message.js'
-import { withWidget } from './parts.js'
+import { appendDeltas, withWidget, type PendingDelta } from './parts.js'
+
+function waitStateOf(message: ChatMessage): TurnWaitState {
+  return {
+    phase: message.waitPhase ?? 'waiting-response',
+    ...(message.thoughtMs !== undefined ? { thoughtMs: message.thoughtMs } : {}),
+    ...(message.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+  }
+}
 
 /**
  * One event of a turn folded into the message it belongs to.
@@ -14,14 +23,19 @@ import { withWidget } from './parts.js'
  * batch and draw them once per frame, so this leaves the message alone for them.
  */
 export function applyEvent(message: ChatMessage, event: AgentEvent, says?: string): ChatMessage {
+  const nextWait = reduceTurnWaitState(waitStateOf(message), event)
+
   if (event.type === 'tool-start') {
-    // Reasoning deltas do not end a wait — they are what fills it. A tool
-    // call is an output of its own, and the wait before it was thinking.
-    const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-    return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running', callId: event.id, ...(event.input ? { input: event.input } : {}) } }], waitingSince: undefined, ...thoughtMsFor(waited, message) }
+    return {
+      ...message,
+      parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running', callId: event.id, ...(event.input ? { input: event.input } : {}) } }],
+      status: undefined,
+      waitPhase: nextWait.phase,
+      thoughtMs: nextWait.thoughtMs,
+      ...(nextWait.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+    }
   }
   if (event.type === 'tool-end') {
-    // The result is in: the model is thinking again about what to do with it.
     // The call that just ended is the one still marked running, which is how the
     // line knows to stop saying it is underway — no second source of truth for
     // what is running, and no name matched against names that repeat.
@@ -45,7 +59,30 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
       : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
         ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result, ...change, ...preview } }
         : part)
-    return { ...message, parts, waitingSince: Date.now() }
+    return {
+      ...message,
+      parts,
+      waitPhase: nextWait.phase,
+      thoughtMs: nextWait.thoughtMs,
+      ...(nextWait.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+    }
+  }
+  if (event.type === 'response-waiting' || event.type === 'reasoning-start' || event.type === 'waited' || event.type === 'compacted' || event.type === 'steer') {
+    return {
+      ...message,
+      status: undefined,
+      waitPhase: nextWait.phase,
+      thoughtMs: nextWait.thoughtMs,
+      ...(nextWait.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+    }
+  }
+  if (event.type === 'reasoning-end') {
+    return {
+      ...message,
+      waitPhase: nextWait.phase,
+      thoughtMs: nextWait.thoughtMs,
+      ...(nextWait.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+    }
   }
   if (event.type === 'todo') return event.items.length > 0
     ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
@@ -57,15 +94,38 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
     // A widget arrives as the model writes it: each draft takes the place of the
     // one before it, and the closed block takes the place of the last draft.
     const part: TranscriptPart = { kind: 'ui', render: event.render, ...(event.draft ? { draft: true } : {}) }
-    return { ...message, parts: withWidget(message.parts, part) }
+    return { ...message, parts: withWidget(message.parts, part), ...(event.draft ? { status: undefined } : {}), waitPhase: nextWait.phase }
   }
   // The words are the daemon's: `says` is what the turn's row shows about the step,
   // written in one place and not once per surface. A step with nothing to say about
   // the row — a finished turn, a tool line — leaves the line that is already there.
-  if (event.type === 'error' || event.type === 'aborted') {
+  if (event.type === 'done' || event.type === 'error' || event.type === 'aborted') {
     // A call left marked running never heard back from, whether the turn failed or was
     // stopped: it stops saying it is underway, and the row says why.
-    return { ...message, parts: settled(message.parts), ...(says ? { status: says } : {}) }
+    return {
+      ...message,
+      parts: settled(message.parts),
+      waitPhase: undefined,
+      thoughtMs: finalThoughtMs(nextWait),
+      ...(says ? { status: says } : {}),
+    }
+  }
+  if (event.type === 'job-waited') {
+    const last = message.parts[message.parts.length - 1]
+    const parts =
+      last?.kind === 'text' && last.text.trim() && !last.text.endsWith('\n\n')
+        ? [...message.parts.slice(0, -1), { ...last, text: `${last.text.replace(/\n+$/, '')}\n\n` }]
+        : message.parts
+    return { ...message, parts, status: undefined, waitPhase: nextWait.phase }
+  }
+  if (event.type === 'waiting' || event.type === 'compacting' || event.type === 'job-waiting') {
+    return {
+      ...message,
+      waitPhase: nextWait.phase,
+      thoughtMs: nextWait.thoughtMs,
+      ...(nextWait.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+      ...(says ? { status: says } : {}),
+    }
   }
   if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
   if (says) return { ...message, status: says }
@@ -73,14 +133,42 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
 }
 
 /**
- * The number a wait leaves behind on the message. The first one worth reporting
- * wins: it belongs to the tool call or the answer it led to, and it sits above
- * both, so a later wait replacing it would rewrite what the reader already read.
- * Under a second there is nothing to report — the terminal's own threshold.
+ * Applies a frame's gathered text/reasoning deltas using the shared turn state
+ * reducer so live delta transitions and duration invalidation match everywhere.
  */
-export function thoughtMsFor(waited: number, message: ChatMessage): { thoughtMs?: number } {
-  if (message.thoughtMs !== undefined || waited < 1000) return {}
-  return { thoughtMs: waited }
+export function applyDeltas(message: ChatMessage, batch: readonly PendingDelta[]): ChatMessage {
+  let state = waitStateOf(message)
+  let wrote = false
+  for (const token of batch) {
+    if (token.kind === 'text') {
+      wrote = true
+      state = reduceTurnWaitState(state, { type: 'text-delta', delta: token.delta })
+    } else {
+      state = reduceTurnWaitState(state, {
+        type: 'reasoning-delta',
+        delta: token.delta,
+        ...(token.replayed ? { replayed: true } : {}),
+      })
+    }
+  }
+  return {
+    ...message,
+    parts: appendDeltas(message.parts, batch),
+    waitPhase: state.phase,
+    thoughtMs: state.thoughtMs,
+    ...(state.hasUnobservedReasoning ? { hasUnobservedReasoning: true } : {}),
+    ...(wrote ? { status: undefined } : {}),
+  }
+}
+
+/**
+ * Finalize accumulated thinking duration when a turn or bot message settles.
+ */
+export function finalizedThoughtMs(message: ChatMessage): number | undefined {
+  return finalThoughtMs({
+    thoughtMs: message.thoughtMs,
+    hasUnobservedReasoning: message.hasUnobservedReasoning,
+  })
 }
 
 /**

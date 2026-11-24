@@ -58,6 +58,7 @@ const TOOLS: Record<string, { icon: string; label: string; brand?: ToolBrand }> 
   routine: { icon: '⏱️', label: 'Routine' },
   task_lists: { icon: '☑️', label: 'Task lists' },
   job_status: { icon: '📊', label: 'Job status' },
+  job_wait: { icon: '⏳', label: 'Waiting for job' },
   job_kill: { icon: '🛑', label: 'Stopped job' },
   task: { icon: '🤖', label: 'Task' },
   crew: { icon: '🤖', label: 'Crew' },

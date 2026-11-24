@@ -1,4 +1,5 @@
 import type { Session } from '../core/session.js'
+import { initialTurnWaitState, reduceTurnWaitState } from '../core/agent/turn-state.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { formatTodos } from '../core/todos.js'
 import { describeRebase } from '../core/sessions/index.js'
@@ -103,7 +104,8 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let botHandled = false
   let hasOutputMessage = false
   let inBot = false
-  let lastFlush = 0
+  let lastFlush = Date.now()
+  let waitState = initialTurnWaitState()
   // Whether anything arrived in the answer channel, and how much came through
   // the thinking one: a provider may fill only the second, and then the display
   // decides whether the turn shows anything at all.
@@ -117,7 +119,11 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let openQuote: 'tool' | 'quote' | null = null
   let reasoning = ''
 
-  const composedOutput = (): string => (activePrefix ? `${activePrefix}${output}` : output)
+  const composedOutput = (): string => {
+    if (output !== '') return activePrefix ? `${activePrefix}${output}` : output
+    if (waitState.phase === 'thinking') return `${activePrefix}💭 Thinking…`
+    return activePrefix
+  }
 
   const flush = async (force = false): Promise<void> => {
     const now = Date.now()
@@ -212,6 +218,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       ...(options.ignoreMentions?.length ? { ignoreMentions: options.ignoreMentions } : {}),
       ask: (request) => surface.ask(chatId, messageId, request),
     })) {
+      waitState = reduceTurnWaitState(waitState, event)
       switch (event.type) {
         case 'bot-start': {
           botHandled = true
@@ -246,9 +253,19 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           await surface.edit(chatId, messageId, clamp(finalBody, maxLength))
           break
         }
+        case 'response-waiting':
+          if (output === '') await flush()
+          break
+        case 'reasoning-start':
+          if (output === '') await flush()
+          break
         case 'reasoning-delta':
           reasoningChars += event.delta.length
           if (display.thinking !== 'collapsed') reasoning += event.delta
+          if (output === '') await flush()
+          break
+        case 'reasoning-end':
+          if (output === '') await flush()
           break
         case 'text-delta':
           // Only text someone can read counts as an answer: a bare newline is not
@@ -320,6 +337,14 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           break
         case 'waiting':
           await appendLine('⏳ another Milo is using this session — waiting for it to finish', 'prose')
+          break
+        case 'job-waiting':
+          await flushReasoning()
+          if (output && !output.endsWith('\n')) atLineEnd = true
+          openQuote = null
+          await flush(true)
+          break
+        case 'job-waited':
           break
         // Turns taken elsewhere are in the model's context but not on this
         // screen — and turns dropped or summarized there are in neither. Saying

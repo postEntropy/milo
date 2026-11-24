@@ -685,7 +685,7 @@ struct JobStrip: View {
             VStack(spacing: MiloTheme.Space.two) {
                 ForEach(jobs) { job in
                     VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-                        chip(job, now: context.date.timeIntervalSince1970)
+                        chip(job, now: context.date.timeIntervalSince1970 * 1000)
                         if open == job.id { log(job) }
                     }
                 }

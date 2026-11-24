@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 20
+let miloProtocolVersion = 21
 
 // MARK: - What the app sends
 
@@ -417,8 +417,11 @@ enum PanelInput {
 /// tolerantly — a shape this build does not know is `other` and draws nothing,
 /// rather than taking the frame down with it.
 enum AgentEvent: Decodable {
+    case responseWaiting
+    case reasoningStart
+    case reasoningEnd(ms: Double?)
     case textDelta(String)
-    case reasoningDelta(String)
+    case reasoningDelta(String, replayed: Bool)
     case toolStart(id: String, name: String, text: String?, input: String?)
     case toolEnd(id: String, name: String, isError: Bool, drawFailure: Bool, result: String?, change: [FileChange]?, preview: ToolPreviewRef?)
     case todo([TodoItem])
@@ -440,6 +443,8 @@ enum AgentEvent: Decodable {
     case rebased(added: Int, removed: Int, compacted: Bool)
     case waiting
     case waited(ms: Int)
+    case jobWaiting(ids: [String])
+    case jobWaited
     case steer(String)
     case done(finishReason: String)
     case aborted
@@ -447,9 +452,9 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case input, type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change, preview
+        case input, type, delta, replayed, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change, preview
         case inputTokens, outputTokens, ms, added, removed, compacted
-        case folded, tokens, summarized
+        case folded, tokens, summarized, ids
         case bot, status, error
     }
 
@@ -464,8 +469,11 @@ enum AgentEvent: Decodable {
         }
 
         switch (try? container.decode(String.self, forKey: .type)) ?? "" {
+        case "response-waiting": self = .responseWaiting
+        case "reasoning-start": self = .reasoningStart
+        case "reasoning-end": self = .reasoningEnd(ms: (try? container.decodeIfPresent(Double.self, forKey: .ms)) ?? nil)
         case "text-delta": self = .textDelta(read(.delta, ""))
-        case "reasoning-delta": self = .reasoningDelta(read(.delta, ""))
+        case "reasoning-delta": self = .reasoningDelta(read(.delta, ""), replayed: read(.replayed, false))
         case "tool-start":
             // `text` is the line the server already drew — the phone cannot import
             // the formatter, so it reads the result rather than keeping a copy.
@@ -502,6 +510,8 @@ enum AgentEvent: Decodable {
             )
         case "waiting": self = .waiting
         case "waited": self = .waited(ms: read(.ms, 0))
+        case "job-waiting": self = .jobWaiting(ids: read(.ids, []))
+        case "job-waited": self = .jobWaited
         case "steer": self = .steer(readText(.text) ?? "")
         case "bot-start":
             if let bot = try? container.decode(BotAuthor.self, forKey: .bot) {

@@ -88,6 +88,7 @@ struct HubView: View {
                 .animation(.smooth(duration: 0.22), value: model.connectionLine)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .toolbarVisibility(.visible, for: .tabBar)
             .navigationDestination(for: HubItem.self) { item in
                 destination(for: item)
             }

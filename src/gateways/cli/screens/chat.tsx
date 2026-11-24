@@ -18,6 +18,7 @@ import type {
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { probeComputerStatus } from '../../../core/computer/index.js'
+import { redactSecrets } from '../../../core/secrets.js'
 import { formatBotAvatarBadge, normalizeBotHandle, resolveBotAvatar } from '../../../core/crew.js'
 import { incomingMime, MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
 import { saveCommandCodeAttachments } from '../../../core/command-code-attachments.js'
@@ -59,14 +60,20 @@ import { FolderPicker, type RecentFolder } from '../components/folder-picker.js'
 import { miloMarkRows } from '../components/milo-mark.js'
 import { SessionPicker } from '../components/session-picker.js'
 import { describePanelRequest, itemsFromMessages, summarizeGenUi } from '../history-items.js'
-import { readInputHistory, saveInputHistory } from '../input-history.js'
+import { appendInputHistory, readInputHistory, saveInputHistory } from '../input-history.js'
 import { isCopyKey, isCtrlC, isExpandToolKey, isMouseToggleKey } from '../keys.js'
 import { theme as defaultTheme, type ThemeColor, type TuiTheme } from '../theme.js'
 import { buildLines, padToBottom, visibleWindow, wrapText, type Item, type Line, type LineSegment } from '../transcript.js'
+import {
+  cliStatusLabel,
+  initialTurnWaitState,
+  reduceTurnWaitState,
+  type TurnWaitPhase,
+} from '../../../core/agent/turn-state.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
-type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting' | 'compacting'
+type Phase = TurnWaitPhase | 'idle'
 
 const HEADER_ROWS = 0
 /** Interval in ms used to coalesce streaming text and reasoning deltas. */
@@ -230,7 +237,13 @@ export function ChatScreen({
   const [live, setLive] = useState('')
   const [reasoning, setReasoning] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
+  const phaseRef = useRef<Phase>('idle')
+  const phaseBeforeAskRef = useRef<Phase>('waiting-response')
   const [toolName, setToolName] = useState('')
+  const updatePhase = useCallback((next: Phase) => {
+    phaseRef.current = next
+    setPhase(next)
+  }, [])
   const [input, setInput] = useState('')
   /** Messages typed while a turn was running, still waiting for it. */
   const [queued, setQueued] = useState(0)
@@ -421,18 +434,19 @@ export function ChatScreen({
   }, [])
 
   const ask = useCallback<PermissionAsker>((request) => {
+    phaseBeforeAskRef.current = phaseRef.current === 'asking' ? 'waiting-response' : phaseRef.current
     setPermission(request)
-    setPhase('asking')
+    updatePhase('asking')
     return new Promise<PermissionResult>((resolve) => {
       permissionResolverRef.current = resolve
     })
-  }, [])
+  }, [updatePhase])
 
   const resolvePermission = (allowed: boolean, remember = false) => {
     const resolve = permissionResolverRef.current
     permissionResolverRef.current = null
     setPermission(null)
-    setPhase('thinking')
+    updatePhase(phaseBeforeAskRef.current)
     resolve?.({ allowed, ...(remember ? { remember } : {}) })
   }
 
@@ -945,7 +959,7 @@ export function ChatScreen({
     reasoningRef.current = ''
     draftUiActiveRef.current = false
     setToolName('')
-    setPhase('thinking')
+    updatePhase('waiting-response')
     setStartedAt(Date.now())
 
     const controller = new AbortController()
@@ -954,32 +968,25 @@ export function ChatScreen({
     const steering: string[] = []
     steeringRef.current = steering
     const startedAtMs = Date.now()
-    // Each wait is its own block: from the question to the model's first visible
-    // output, then from the last tool result to the next one. Reasoning deltas do
-    // not end it — they *are* the thinking; they are what fills the block.
-    let waitingSince = startedAtMs
+    let waitState = initialTurnWaitState()
     /** Whether anything arrived in the answer channel at all. */
     let answered = false
     /** Reasoning seen this turn, counted even when it is not kept. */
     let reasoningChars = 0
-    /** Thinking too fast to be worth a line, kept in case it was the answer. */
-    const dropped: string[] = []
     let botTurnHandled = false
     let activeBot: BotAuthor | null = null
+    const flushReasoning = (ms?: number) => {
+      flushStream()
+      const thought = reasoningRef.current.trim()
+      reasoningRef.current = ''
+      setReasoning('')
+      // Only observed reasoning blocks longer than 1s report a duration.
+      const header = ms !== undefined && ms >= 1000 ? `✻ Thought for ${formatSeconds(ms / 1000)}` : ''
+      if (!thought && !header) return
+      push({ kind: 'reasoning', header, text: thought })
+    }
     const flushBotTail = () => {
-      const trailing = [...dropped, reasoningRef.current.trim()].filter(Boolean)
-      if (trailing.length > 0) {
-        const seconds = (Date.now() - waitingSince) / 1000
-        push({
-          kind: 'reasoning',
-          // Same rule as any other wait: under a second there is nothing to say.
-          header: seconds < 1 ? '' : `✻ Thought for ${formatSeconds(seconds)}`,
-          text: trailing.join('\n\n'),
-        })
-        reasoningRef.current = ''
-        setReasoning('')
-      }
-      dropped.length = 0
+      flushReasoning()
       if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
         push({
           kind: 'info',
@@ -990,22 +997,6 @@ export function ChatScreen({
       }
       commitLive()
       draftUiActiveRef.current = false
-    }
-    const stopWaiting = () => {
-      flushStream()
-      const seconds = (Date.now() - waitingSince) / 1000
-      waitingSince = Date.now()
-      const thought = reasoningRef.current.trim()
-      reasoningRef.current = ''
-      setReasoning('')
-      // Under a second with nothing to account for there is nothing worth saying
-      // — unless the thought is all the turn has said, which is only known at the
-      // end.
-      if (seconds < 1) {
-        if (thought) dropped.push(thought)
-        return
-      }
-      push({ kind: 'reasoning', header: `✻ Thought for ${formatSeconds(seconds)}`, text: thought })
     }
 
     try {
@@ -1022,21 +1013,33 @@ export function ChatScreen({
         mediaNotices,
         ...(model ? { model } : {}),
       })) {
+        waitState = reduceTurnWaitState(waitState, event)
         applyEvent(event, {
+          onResponseWaiting: () => {
+            updatePhase('waiting-response')
+          },
+          onReasoningStart: () => {
+            updatePhase('thinking')
+          },
+          onReasoningEnd: (ms) => {
+            flushReasoning(ms)
+            updatePhase(waitState.phase)
+          },
           onText: (delta) => {
-            stopWaiting()
+            if (reasoningRef.current.trim()) flushReasoning()
             // Only text someone can read counts as an answer: a bare newline is
             // not one, and counting it switched off the rules that keep a turn's
             // thinking visible — leaving a ✻ line and nothing else on screen.
             if (delta.trim()) answered = true
             liveRef.current += delta
-            setPhase('writing')
+            updatePhase('writing')
             scheduleFlush()
           },
-          onReasoning: (delta) => {
+          onReasoning: (delta, replayed) => {
             // Counted whatever the level: a turn that says nothing in the answer
             // channel is worth explaining, and that is all that is left to go on.
             reasoningChars += delta.length
+            if (!replayed) updatePhase('thinking')
             // `collapsed` keeps only the line above: nothing on the terminal is
             // going to display the text, and it has no way to open it.
             if (display.thinking === 'collapsed') return
@@ -1045,8 +1048,7 @@ export function ChatScreen({
           },
           onToolStart: (name, args) => {
             toolArgsRef.current = args
-            // A tool call with no prose before it is still the thinking ending.
-            stopWaiting()
+            if (reasoningRef.current.trim()) flushReasoning()
             // The step's text ends here. A turn's answer arrives one message per
             // step, and left as one blob the preamble before a tool call runs
             // straight into what follows it — "interage com a confirmação." +
@@ -1056,12 +1058,15 @@ export function ChatScreen({
             commitLive()
             draftUiActiveRef.current = false
             // `off` keeps tool activity out of the transcript and out of the
-            // status line, so the turn reads as plain thinking. A tool whose own
-            // call is not drawn never reaches the status line either.
-            if (display.tools === 'off' || !showsToolCall(name)) return
+            // status line, so the turn reads as waiting without a tool label.
+            // A tool whose own call is not drawn never reaches the status line either.
+            if (display.tools === 'off' || !showsToolCall(name)) {
+              updatePhase('waiting-response')
+              return
+            }
             const detail = display.tools === 'full' ? toolDetail(args) : ''
             setToolName(detail ? `${toolDisplayName(name)} · ${detail}` : toolDisplayName(name))
-            setPhase('tool')
+            updatePhase('tool')
           },
           onToolEnd: (name, result, isError, change) => {
             // A failure is always shown, even with tools off.
@@ -1083,10 +1088,7 @@ export function ChatScreen({
               })
             }
             setToolName('')
-            setPhase('thinking')
-            // The next wait starts when the tool is done, not when it was asked
-            // for: running the tool is not the model thinking.
-            waitingSince = Date.now()
+            updatePhase('waiting-response')
           },
           // The plan is drawn as its own block, not a tool line, so it appears
           // whatever the tool level is set to — the person watching a long turn
@@ -1125,19 +1127,28 @@ export function ChatScreen({
           // The band says the fold is running; the transcript gets what it came to
           // once it is over. The clock starts again there, so the fold is counted
           // in its own line rather than in the model's wait beside it.
-          onCompacting: () => setPhase('compacting'),
+          onCompacting: () => updatePhase('compacting'),
           onCompacted: (fold) => {
-            waitingSince = Date.now()
-            setPhase('thinking')
+            updatePhase('waiting-response')
             push({ kind: 'info', text: compactReply(fold) })
           },
           // The status line carries the wait while it lasts; the transcript gets
           // it once it is over, with what it actually cost.
-          onWaiting: () => setPhase('waiting'),
+          onWaiting: () => updatePhase('waiting'),
           onWaited: (ms) => {
-            waitingSince = Date.now()
-            setPhase('thinking')
+            updatePhase('waiting-response')
             push({ kind: 'info', text: `⏳ waited ${formatSeconds(ms / 1000)} for another Milo.` })
+          },
+          onJobWaiting: (ids) => {
+            if (reasoningRef.current.trim()) flushReasoning()
+            commitLive()
+            draftUiActiveRef.current = false
+            setToolName(ids.length === 1 ? `waiting for ${ids[0]}` : `waiting for ${ids.length} jobs`)
+            updatePhase('waiting-job')
+          },
+          onJobWaited: () => {
+            setToolName('')
+            updatePhase('waiting-response')
           },
           onRebased: (rebasedEvent) => {
             const notice: Item = {
@@ -1156,17 +1167,15 @@ export function ChatScreen({
             activeBot = bot
             answered = false
             reasoningChars = 0
-            dropped.length = 0
-            waitingSince = Date.now()
             setToolName('')
-            setPhase('thinking')
+            updatePhase('waiting-response')
             push({ kind: 'bot', bot })
           },
           onBotEnd: () => {
             flushStream()
             flushBotTail()
             activeBot = null
-            waitingSince = Date.now()
+            updatePhase('waiting-response')
           },
           onDone: (finishReason) => {
             flushStream()
@@ -1240,7 +1249,7 @@ export function ChatScreen({
       } finally {
         runningRef.current = false
         steeringRef.current = null
-        setPhase('idle')
+        updatePhase('idle')
         setQueued(queueRef.current.length)
         const dropped = droppedRef.current
         droppedRef.current = 0
@@ -1295,10 +1304,8 @@ export function ChatScreen({
 
   /** Records a line that was sent, and puts the arrows back at the live end. */
   const remember = (text: string) => {
-    const history = inputHistoryRef.current
-    // The same line twice in a row is one entry: recalling it twice is noise.
-    if (history[history.length - 1] !== text) history.push(text)
-    if (history.length > HISTORY_LIMIT) history.shift()
+    const history = appendInputHistory(inputHistoryRef.current, text, HISTORY_LIMIT)
+    inputHistoryRef.current = history
     historyIndexRef.current = null
     draftRef.current = ''
     void saveInputHistory(history)
@@ -1430,7 +1437,7 @@ export function ChatScreen({
     // trace read as if it had never been sent. Filing the answer still
     // streaming first is what keeps the order.
     commitLive()
-    push({ kind: 'user', text: rawText })
+    push({ kind: 'user', text: redactSecrets(rawText).text })
     setScrollOffset(0)
 
     // A command that throws must not become an unhandled rejection: say what
@@ -1454,18 +1461,7 @@ export function ChatScreen({
     pump()
   }
 
-  const statusLabel =
-    phase === 'asking'
-      ? 'waiting for confirmation'
-      : phase === 'compacting'
-        ? 'folding the oldest turns into the summary…'
-        : phase === 'waiting'
-          ? 'waiting for another Milo on this session…'
-          : phase === 'tool'
-            ? `${toolName}…`
-            : phase === 'writing'
-              ? 'writing…'
-              : 'thinking…'
+  const statusLabel = cliStatusLabel(phase, { toolName })
 
   const statusText = `${statusLabel} 00.0s${queued > 0 ? ` · ${queued} queued` : ''}`
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset}/${window.maxOffset})` : ''
@@ -1718,8 +1714,11 @@ export function ChatScreen({
 }
 
 interface EventHandlers {
+  onResponseWaiting: () => void
+  onReasoningStart: () => void
+  onReasoningEnd: (ms?: number) => void
   onText: (delta: string) => void
-  onReasoning: (delta: string) => void
+  onReasoning: (delta: string, replayed?: boolean) => void
   onToolStart: (name: string, args: unknown) => void
   onToolEnd: (name: string, result: string, isError: boolean, change?: FileChange[]) => void
   /** The plan the model is keeping, in full, each time it changes. */
@@ -1742,6 +1741,10 @@ interface EventHandlers {
   onWaiting: () => void
   /** The wait is over, and how long it was. The turn starts here. */
   onWaited: (ms: number) => void
+  /** Waiting inside the turn for background job(s) it started. */
+  onJobWaiting: (ids: string[]) => void
+  /** The background job wait ended and the turn is resuming. */
+  onJobWaited: () => void
   /** The session was not as this copy had it: turns arrived, or went, elsewhere. */
   onRebased: (event: { added: number; removed: number; compacted: boolean }) => void
   onBotStart: (bot: BotAuthor) => void
@@ -1753,11 +1756,20 @@ interface EventHandlers {
 
 function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
   switch (event.type) {
+    case 'response-waiting':
+      handlers.onResponseWaiting()
+      break
+    case 'reasoning-start':
+      handlers.onReasoningStart()
+      break
+    case 'reasoning-end':
+      handlers.onReasoningEnd(event.ms)
+      break
     case 'text-delta':
       handlers.onText(event.delta)
       break
     case 'reasoning-delta':
-      handlers.onReasoning(event.delta)
+      handlers.onReasoning(event.delta, event.replayed)
       break
     case 'tool-start':
       handlers.onToolStart(event.name, event.args)
@@ -1794,6 +1806,12 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       break
     case 'waited':
       handlers.onWaited(event.ms)
+      break
+    case 'job-waiting':
+      handlers.onJobWaiting(event.ids)
+      break
+    case 'job-waited':
+      handlers.onJobWaited()
       break
     case 'rebased':
       handlers.onRebased(event)

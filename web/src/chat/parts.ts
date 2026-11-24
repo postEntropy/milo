@@ -57,6 +57,7 @@ export function appendReasoning(parts: TranscriptPart[], delta: string): Transcr
 export interface PendingDelta {
   kind: 'text' | 'reasoning'
   delta: string
+  replayed?: boolean
 }
 
 /**
@@ -65,11 +66,16 @@ export interface PendingDelta {
  * gathering them per channel would lose which came first and put the thought
  * after words it came before, cutting the sentence around it.
  */
-export function withDelta(batch: readonly PendingDelta[], kind: PendingDelta['kind'], delta: string): PendingDelta[] {
+export function withDelta(
+  batch: readonly PendingDelta[],
+  kind: PendingDelta['kind'],
+  delta: string,
+  replayed?: boolean,
+): PendingDelta[] {
   const last = batch[batch.length - 1]
-  return last?.kind === kind
-    ? [...batch.slice(0, -1), { kind, delta: last.delta + delta }]
-    : [...batch, { kind, delta }]
+  return last?.kind === kind && Boolean(last.replayed) === Boolean(replayed)
+    ? [...batch.slice(0, -1), { kind, delta: last.delta + delta, ...(replayed ? { replayed: true } : {}) }]
+    : [...batch, { kind, delta, ...(replayed ? { replayed: true } : {}) }]
 }
 
 /** Draws one frame's tokens into a turn, in the order they arrived. */

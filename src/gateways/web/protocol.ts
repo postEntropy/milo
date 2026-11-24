@@ -11,6 +11,24 @@ import type { ExplicitMentionRef } from '../../core/crew-mentions.js'
 import type { BotAuthor } from '../../core/providers/types.js'
 export type { BotAuthor, ExplicitMentionRef as MessageMentionRef }
 import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '../../core/sessions/types.js'
+import {
+  finalThoughtMs,
+  initialTurnWaitState,
+  reduceTurnWaitState,
+  waitIndicator,
+  type TurnWaitPhase,
+  type TurnWaitState,
+  type WaitIndicator,
+} from '../../core/agent/turn-state.js'
+export {
+  finalThoughtMs,
+  initialTurnWaitState,
+  reduceTurnWaitState,
+  waitIndicator,
+  type TurnWaitPhase,
+  type TurnWaitState,
+  type WaitIndicator,
+}
 import type { CommandEntry } from '../command-catalog.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 export type { PermissionRequest } from '../../core/tools/permission.js'
@@ -37,6 +55,7 @@ export {
   type PaletteState,
 }
 
+// 21: Explicit `response-waiting`, `reasoning-start`, and `reasoning-end` events separate provider wait from observed reasoning.
 // 20: Explicit `@mention` selections (`send.mentions`) keep colliding bot/folder picks single-target across surfaces.
 // 19: Crew bot authorship (`bot`, `error`), direct bot Sessions (`ready.bot`), and per-bot turn events (`bot-start`, `bot-end`).
 // 18: the daemon sends the authoritative palette sync state on connect and after changes.
@@ -67,7 +86,7 @@ export {
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 20
+export const PROTOCOL_VERSION = 21
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -114,8 +133,11 @@ export interface ToolPreviewRef {
 }
 
 export type AgentEvent =
+  | { type: 'response-waiting' }
+  | { type: 'reasoning-start' }
+  | { type: 'reasoning-delta'; delta: string; replayed?: boolean }
+  | { type: 'reasoning-end'; ms?: number }
   | { type: 'text-delta'; delta: string }
-  | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string; input?: string }
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; drawFailure?: boolean; change?: FileChange[]; preview?: ToolPreviewRef }
   | { type: 'todo'; items: TodoItem[] }
@@ -128,6 +150,8 @@ export type AgentEvent =
   | { type: 'waiting' }
   | { type: 'waited'; ms: number }
   | { type: 'steer'; text: string }
+  | { type: 'job-waiting'; ids: string[] }
+  | { type: 'job-waited'; ids: string[]; ms: number; reason: 'settled' | 'steered' }
   /** The project's own checks after a turn that wrote. Display state only. */
   | { type: 'verification'; result: VerificationResult; text: string; ok: boolean }
   | { type: 'bot-start'; bot: BotAuthor }

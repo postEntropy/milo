@@ -9,8 +9,8 @@ import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList } from './chat/MessageList.js'
 import type { ChatMessage } from './chat/message.js'
-import { appendDeltas, withDelta, type PendingDelta } from './chat/parts.js'
-import { applyEvent, settled, thoughtMsFor } from './chat/frames.js'
+import { withDelta, type PendingDelta } from './chat/parts.js'
+import { applyDeltas, applyEvent, finalizedThoughtMs, settled } from './chat/frames.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Email } from './email/Email.js'
@@ -619,16 +619,7 @@ export default function App() {
       setMessages((current) => current.map((message) => {
         const add = buffer.get(message.id)
         if (!add) return message
-        // A batch is drawn in the order its tokens arrived: the thought that was
-        // still arriving when the answer began stays above it rather than splitting
-        // the paragraph it was written before.
-        const wrote = add.some((token) => token.kind === 'text')
-        const waited = wrote && message.waitingSince ? Date.now() - message.waitingSince : 0
-        return {
-          ...message,
-          parts: appendDeltas(message.parts, add),
-          ...(wrote ? { waitingSince: undefined, ...thoughtMsFor(waited, message) } : {}),
-        }
+        return applyDeltas(message, add)
       }))
     }
     // Anything that is not a token is drawn in order: the text that led to it
@@ -676,7 +667,7 @@ export default function App() {
       // opened under the id it is drawn with, and the events it has already said
       // arrive right behind this frame and land in it.
       if (frame.activeTurn) {
-        opened.push({ id: frame.activeTurn.id, role: 'assistant', parts: [], at: frame.activeTurn.at, waitingSince: Date.now() })
+        opened.push({ id: frame.activeTurn.id, role: 'assistant', parts: [], at: frame.activeTurn.at, waitPhase: 'waiting-response' })
       }
       setMessages(opened)
       // Words owed to a forked or newly created session go out only once that exact
@@ -699,7 +690,7 @@ export default function App() {
           id: `loaded-${loaded + offset}`,
           loaded: true,
         }))
-        const running = current.findIndex((message) => message.waitingSince !== undefined)
+        const running = current.findIndex((message) => message.waitPhase !== undefined)
         return running === -1 ? [...current, ...rows] : [...current.slice(0, running), ...rows, ...current.slice(running)]
       })
       // The plan's floor is a count of the thread, and this lengthened it.
@@ -751,8 +742,15 @@ export default function App() {
       // message carries it, so the line appears where the reply will.
       const now = Date.now()
       setMessages((current) => {
+        if (current.some((message) => message.id === frame.id)) {
+          return current.map((message) =>
+            message.id === frame.id
+              ? { ...message, parts: [], status: undefined, waitPhase: 'waiting-response', thoughtMs: undefined, hasUnobservedReasoning: undefined }
+              : message,
+          )
+        }
         const user = { id: `user-${frame.id}`, role: 'user' as const, parts: [{ kind: 'text' as const, text: frame.text }], at: now }
-        return [...current, user, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }]
+        return [...current, user, { id: frame.id, role: 'assistant', parts: [], waitPhase: 'waiting-response', at: now }]
       })
       setBusy(true)
       return
@@ -763,11 +761,10 @@ export default function App() {
         const currentBot = activeBotMessageIds.current.get(frame.turnId)
         if (!currentBot) {
           activeBotMessageIds.current.set(frame.turnId, { messageId: frame.turnId, index: 1 })
-          const startedAt = Date.now()
           setMessages((current) =>
             current.map((message) =>
               message.id === frame.turnId
-                ? { ...message, bot: event.bot, waitingSince: startedAt }
+                ? { ...message, bot: event.bot, waitPhase: 'waiting-response' }
                 : message,
             ),
           )
@@ -777,7 +774,7 @@ export default function App() {
           const startedAt = Date.now()
           setMessages((current) => [
             ...current,
-            { id: nextId, role: 'assistant', bot: event.bot, parts: [], waitingSince: startedAt, at: startedAt },
+            { id: nextId, role: 'assistant', bot: event.bot, parts: [], waitPhase: 'waiting-response', at: startedAt },
           ])
         }
         return
@@ -790,7 +787,8 @@ export default function App() {
               ? {
                   ...message,
                   parts: settled(message.parts),
-                  waitingSince: undefined,
+                  waitPhase: undefined,
+                  thoughtMs: finalizedThoughtMs(message),
                   ...(event.status === 'error' && event.error ? { error: event.error } : {}),
                 }
               : message,
@@ -801,7 +799,8 @@ export default function App() {
       if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
         const buffered = pendingDeltas.current.get(targetId) ?? []
         const kind = event.type === 'text-delta' ? 'text' : 'reasoning'
-        pendingDeltas.current.set(targetId, withDelta(buffered, kind, event.delta))
+        const replayed = event.type === 'reasoning-delta' ? event.replayed : undefined
+        pendingDeltas.current.set(targetId, withDelta(buffered, kind, event.delta, replayed))
         if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
         return
       }
@@ -825,7 +824,8 @@ export default function App() {
         ? {
             ...message,
             parts: settled(message.parts),
-            waitingSince: undefined,
+            waitPhase: undefined,
+            thoughtMs: finalizedThoughtMs(message),
             ...(message.id === targetId && frame.raw ? { raw: frame.raw } : {}),
             ...(message.id === targetId && frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}),
             ...(message.id === targetId && frame.says ? { status: frame.says } : {}),

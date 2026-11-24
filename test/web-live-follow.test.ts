@@ -4,6 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import type { PermissionPolicy, ToolRegistry } from '../src/core/tools/index.js'
+import type { AgentEvent } from '../src/gateways/web/protocol.js'
+import { applyDeltas, applyEvent } from '../web/src/chat/frames.js'
+import type { ChatMessage } from '../web/src/chat/message.js'
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-live-follow-'))
 process.env.MILO_HOME = home
@@ -669,6 +672,51 @@ describe('session folder sync across screens', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('reconstructs observable thinking phase cleanly when a client reconnects mid-reasoning', async () => {
+    const started = gate()
+    const allowed = gate()
+    const reasoningProvider: Provider = {
+      id: 'reasoning-held',
+      async *stream(request: ChatRequest): AsyncGenerator<StreamEvent> {
+        yield { type: 'reasoning-start' }
+        yield { type: 'reasoning', delta: 'analyzing state' }
+        started.open()
+        await until(allowed.promise, request.signal)
+        yield { type: 'reasoning-end' }
+        yield { type: 'text', delta: 'all clear' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const { hub, at } = await twoScreens(reasoningProvider)
+    hub.handle(at, { type: 'send', text: 'check reconnect' }, DESKTOP)
+    await started.promise
+
+    const arriving: Frame[] = []
+    await hub.connect(client(arriving), PHONE)
+    const ready = arriving.find((frame) => frame.type === 'ready')
+    expect(ready?.activeTurn?.id).toEqual(expect.any(String))
+
+    let replayed: ChatMessage = { id: ready!.activeTurn!.id, role: 'assistant', parts: [], waitPhase: 'waiting-response' }
+    for (const frame of arriving) {
+      if (frame.type === 'event' && frame.event) {
+        const event = frame.event as AgentEvent
+        if (event.type === 'reasoning-delta') {
+          replayed = applyDeltas(replayed, [{ kind: 'reasoning', delta: event.delta, ...(event.replayed ? { replayed: true } : {}) }])
+        } else if (event.type === 'text-delta') {
+          replayed = applyDeltas(replayed, [{ kind: 'text', delta: event.delta }])
+        } else {
+          replayed = applyEvent(replayed, event, frame.says)
+        }
+      }
+    }
+    expect(replayed.waitPhase).toBe('thinking')
+    expect(replayed.thoughtMs).toBeUndefined()
+
+    allowed.open()
+    expect(await waitFor(() => arriving.some((frame) => frame.type === 'turn-end'))).toBe(true)
   })
 })
 

@@ -298,9 +298,23 @@ class SpotlightBridge {
     }
     if (frame.type === 'event') {
       const event = frame.event
-      if (event.type === 'text-delta') this.report({ type: 'text', delta: event.delta })
+      if (event.type === 'reasoning-start') this.report({ type: 'status', text: 'Thinking…' })
+      else if (
+        event.type === 'response-waiting' ||
+        event.type === 'reasoning-end' ||
+        event.type === 'waited' ||
+        event.type === 'compacted' ||
+        event.type === 'job-waited'
+      ) {
+        this.report({ type: 'status', text: '…' })
+      } else if (event.type === 'waiting' || event.type === 'compacting' || event.type === 'job-waiting') {
+        if (frame.says) this.report({ type: 'status', text: frame.says })
+      } else if (event.type === 'text-delta') this.report({ type: 'text', delta: event.delta })
       else if (event.type === 'tool-start') this.report({ type: 'tool', text: event.text ?? toolText(event.name, event.args), state: 'running' })
-      else if (event.type === 'tool-end') this.report({ type: 'tool', text: toolText(event.name), state: event.isError && event.drawFailure !== false ? 'failed' : 'done' })
+      else if (event.type === 'tool-end') {
+        this.report({ type: 'tool', text: toolText(event.name), state: event.isError && event.drawFailure !== false ? 'failed' : 'done' })
+        this.report({ type: 'status', text: '…' })
+      }
       else if (event.type === 'error') this.report({ type: 'error', message: event.message })
       else if (event.type === 'verification' && !event.ok) this.report({ type: 'error', message: event.text })
       return

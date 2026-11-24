@@ -39,6 +39,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   routine: 'repeat',
   task_lists: 'list-check',
   job_status: 'clock',
+  job_wait: 'clock',
   job_kill: 'stop',
   git: 'branch',
   git_commit: 'branch',

@@ -74,6 +74,7 @@ Item {
     : []
   property string step: ""
   property string status: "Ready"
+  property int waitTick: 0
   property string errorText: ""
   property bool busy: false
   property bool connected: false
@@ -91,6 +92,8 @@ Item {
 
   readonly property bool awaitingPermission: permissionId !== ""
   readonly property string line: errorText !== "" ? errorText : step !== "" ? step : status
+  readonly property string visibleLine: line === "…" ? (waitTick === 0 ? "." : waitTick === 1 ? ".." : "...") : line
+  readonly property string accessibleLine: line === "…" ? "Waiting for response" : line
 
   /** What the line says when no turn is in flight: the daemon's state, or the helper's own failure. */
   function idleStatus() {
@@ -205,7 +208,8 @@ Item {
       thread.append({ role: "milo", text: "" })
       miloAt = thread.count - 1
       busy = true
-      status = "Thinking…"
+      waitTick = 0
+      status = "…"
     } else if (message.type === "state") {
       busy = message.busy
     } else if (message.type === "accepted") {
@@ -215,7 +219,8 @@ Item {
       if (prompt.text.trim() === pendingQuery.trim()) prompt.text = ""
       pendingQuery = ""
       sending = false
-      status = "Thinking…"
+      waitTick = 0
+      status = "…"
       working = true
       prompt.focus = false
     } else if (message.type === "projects") {
@@ -745,10 +750,18 @@ Item {
             anchors.bottomMargin: Style.spacing.controlPaddingY / 2
             spacing: Style.spacing.sm / 2
 
+            Timer {
+              interval: 380
+              repeat: true
+              running: root.opened && root.line === "…"
+              onTriggered: root.waitTick = (root.waitTick + 1) % 3
+            }
+
             Text {
               textFormat: Text.PlainText
               width: parent.width
-              text: root.projectName !== "" ? root.projectName + " · " + root.line : root.line
+              text: root.projectName !== "" ? root.projectName + " · " + root.visibleLine : root.visibleLine
+              Accessible.name: root.projectName !== "" ? root.projectName + " · " + root.accessibleLine : root.accessibleLine
               color: root.busy ? root.accent : root.foreground
               opacity: 0.85
               font.family: root.fontFamily

@@ -654,6 +654,7 @@ struct CrewView: View {
                 }
             }
         )
+        .toolbarVisibility(.visible, for: .tabBar)
         .toolbar(externalPath != nil ? .visible : .hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: CrewPage.self) { page in

@@ -1,4 +1,4 @@
-import type { ActionRow, SessionCardItem, TranscriptMessage } from '@protocol'
+import type { ActionRow, SessionCardItem, TranscriptMessage, TurnWaitPhase } from '@protocol'
 
 /**
  * One row of a conversation on a screen: what the server sent, plus what the page
@@ -12,11 +12,12 @@ export interface ChatMessage extends TranscriptMessage {
   status?: string
   /** What this turn cost the model: tokens in, tokens out. */
   tokens?: { input: number; output: number }
-  /** How long the model took before its first output of this turn, in ms. */
+  /** Observed reasoning duration across completed reasoning blocks, in ms. */
   thoughtMs?: number
-  /** When the turn's wait for its next output began: what the thought time is
-   *  measured from, and that its own line belongs on screen. */
-  waitingSince?: number
+  /** Active wait/response phase for this message while the turn is running. */
+  waitPhase?: TurnWaitPhase
+  /** True when reasoning happened without measurable start/end boundaries. */
+  hasUnobservedReasoning?: boolean
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
   actions?: ActionRow[]

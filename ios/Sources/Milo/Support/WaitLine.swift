@@ -11,17 +11,42 @@ import SwiftUI
  screen.
  */
 struct WaitLine: View {
-    var label = "Thinking"
+    var label = "Waiting for response"
+    var icon = "sparkles"
+    var dots = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: MiloTheme.Space.two) {
-            Image(systemName: "lightbulb.max.fill")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(MiloTheme.muted)
-            Glare(text: label, font: MiloTheme.Text.base)
+        Group {
+            if dots {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || scenePhase != .active)) { context in
+                    let cycle = reduceMotion
+                        ? 0
+                        : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                    HStack(spacing: 4) {
+                        ForEach(0..<3, id: \.self) { index in
+                            let step = (cycle - Double(index) * 0.14 + 1.0).truncatingRemainder(dividingBy: 1.0)
+                            let pulse = step < 0.4 ? sin((step / 0.4) * .pi) : 0.0
+                            Circle()
+                                .fill(MiloTheme.muted.opacity(0.32 + 0.58 * pulse))
+                                .frame(width: 4.5, height: 4.5)
+                                .offset(y: -1 * pulse)
+                        }
+                    }
+                    .frame(minHeight: 18)
+                }
+            } else {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(MiloTheme.muted)
+                    Glare(text: label, font: MiloTheme.Text.base)
+                }
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Milo is working")
+        .accessibilityLabel(label)
     }
 }
 

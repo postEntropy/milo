@@ -274,13 +274,15 @@ struct MessageRow: View, Equatable {
                     if foot, !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
                     }
-                    // The wait for the model's next output, wherever it falls: the line
-                    // belongs to the turn's own state, not to the gap before its first
-                    // words — so a turn thinking about a tool's result says so instead of
-                    // going quiet. A widget being drawn is the work showing itself, which
-                    // is why the browser leaves its own line off while one is.
-                    if foot, message.waiting, !drawingADraft {
-                        WaitLine()
+                    // The wait for the model's next output or provider-signaled reasoning,
+                    // wherever it falls. A widget being drawn is the work showing itself,
+                    // which is why the browser leaves its own line off while one is.
+                    if foot, !drawingADraft {
+                        if message.waitPhase == .thinking {
+                            WaitLine(label: "Thinking", icon: "lightbulb.max.fill", dots: false)
+                        } else if message.waitPhase == .waitingResponse {
+                            WaitLine(label: "Waiting for response", dots: true)
+                        }
                     }
                     if foot, let error = message.error {
                         Text(error)

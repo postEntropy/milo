@@ -163,22 +163,22 @@ describe('web protocol', () => {
     expect(frame).toEqual({ type: 'plan', plan: true })
   })
 
-  it('speaks protocol version 20 and carries bot authorship, mention refs, and palette state frames', () => {
-    expect(PROTOCOL_VERSION).toBe(20)
+  it('speaks protocol version 21 and carries bot authorship, mention refs, and palette state frames', () => {
+    expect(PROTOCOL_VERSION).toBe(21)
     expect(
       helloVersion({
         type: 'hello',
-        version: 20,
+        version: 21,
         chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
       }),
     ).toBe(PROTOCOL_VERSION)
     expect(
       helloVersion({
         type: 'hello',
-        version: 19,
+        version: 20,
         chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
       }),
-    ).toBe(19)
+    ).toBe(20)
 
     const paletteFrame: ServerFrame = { type: 'palette-state', sync: true, palette: 'ocean' }
     expect(paletteFrame).toEqual({ type: 'palette-state', sync: true, palette: 'ocean' })
@@ -186,7 +186,7 @@ describe('web protocol', () => {
     const bot = { id: 'bot-1', name: 'Comunista', handle: 'comunista' }
     const readyFrame: ServerFrame = {
       type: 'ready',
-      version: 20,
+      version: 21,
       sessionId: 's1',
       messages: [{ role: 'assistant', parts: [{ kind: 'text', text: 'Oi' }], bot }],
       thinking: 'expanded',

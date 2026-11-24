@@ -651,7 +651,7 @@ export function SettingsScreen({
       ...current,
       memory: {
         ...current.memory,
-        embedding: { provider: 'openrouter', model: DEFAULT_CLOUD_EMBED_MODEL },
+        embedding: { provider: 'openrouter' },
       },
     }))
     setNotices([
