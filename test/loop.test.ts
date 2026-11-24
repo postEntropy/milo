@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import { runAgent } from '../src/core/agent/loop.js'
+import { finalThoughtMs, initialTurnWaitState, reduceTurnWaitState } from '../src/core/agent/turn-state.js'
+import { AnthropicProvider } from '../src/core/providers/anthropic.js'
+import { ResponsesProvider } from '../src/core/providers/responses.js'
 import type {
   ChatRequest,
   Message,
@@ -979,6 +982,275 @@ describe('runAgent — concurrent tool error & abort pairing', () => {
     const answered = parts.filter((part): part is ToolResultPart => part.type === 'tool-result').map((part) => part.id)
     expect(called).toEqual(['c1', 'c2'])
     expect(answered).toEqual(['c1', 'c2'])
+  })
+
+  it('emits response-waiting per call and omits client-measured duration unless the provider gives explicit durationMs', async () => {
+    vi.useFakeTimers()
+    try {
+      let step = 0
+      const provider: Provider = {
+        id: 'timed',
+        async *stream(): AsyncGenerator<StreamEvent> {
+          if (step === 0) {
+            step += 1
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+            yield { type: 'reasoning-start' }
+            yield { type: 'reasoning', delta: 'step 1' }
+            await new Promise((resolve) => setTimeout(resolve, 1200))
+            yield { type: 'reasoning-end' }
+            yield { type: 'tool-call', id: 'c1', name: 'slow_tool', args: {} }
+            yield { type: 'done', finishReason: 'tool_calls' }
+            return
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+          yield { type: 'text', delta: 'all done' }
+          yield { type: 'done', finishReason: 'stop' }
+        },
+      }
+      const registry = new ToolRegistry()
+      registry.register({
+        name: 'slow_tool',
+        description: 'waits 3s',
+        schema: z.object({}),
+        async execute() {
+          await new Promise((resolve) => setTimeout(resolve, 3000))
+          return { content: 'ok' }
+        },
+      })
+      const events: AgentEvent[] = []
+      const driving = (async () => {
+        for await (const event of runAgent({
+          provider,
+          model: 'm',
+          tools: registry.specs(),
+          registry,
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+          context: { cwd: process.cwd(), signal: new AbortController().signal },
+        })) {
+          events.push(event)
+        }
+      })()
+      await vi.advanceTimersByTimeAsync(2000 + 1200 + 3000 + 1500)
+      await driving
+
+      expect(events.filter((e) => e.type === 'response-waiting')).toHaveLength(2)
+      const reasoningEnd = events.find((e): e is Extract<AgentEvent, { type: 'reasoning-end' }> => e.type === 'reasoning-end')
+      expect(reasoningEnd).toEqual({ type: 'reasoning-end' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('closes active reasoning without a duration when the stream fails mid-reasoning', async () => {
+    const provider: Provider = {
+      id: 'failing-mid-reasoning',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        yield { type: 'reasoning-start' }
+        yield { type: 'reasoning', delta: 'partial' }
+        throw new Error('stream dropped')
+      },
+    }
+    const registry = new ToolRegistry()
+    const events: AgentEvent[] = []
+    await expect(async () => {
+      for await (const event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+        context: { cwd: process.cwd(), signal: new AbortController().signal },
+      })) {
+        events.push(event)
+      }
+    }).rejects.toThrow('stream dropped')
+
+    const end = events.find((e): e is Extract<AgentEvent, { type: 'reasoning-end' }> => e.type === 'reasoning-end')
+    expect(end).toEqual({ type: 'reasoning-end' })
+  })
+
+  it('passes Responses response.completed fallback through runAgent without starting thinking or timer, while keeping summary in transcript', async () => {
+    const sse = `data: ${JSON.stringify({
+      type: 'response.completed',
+      response: {
+        status: 'completed',
+        output: [
+          { type: 'reasoning', encrypted_content: 'enc_1', summary: [{ type: 'summary_text', text: 'post-hoc summary' }] },
+          { type: 'message', content: [{ type: 'output_text', text: 'final answer' }] },
+        ],
+      },
+    })}\n\n`
+    const fetchMock = vi.fn(async () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const provider = new ResponsesProvider({ id: 'chatgpt', baseURL: 'https://example.test', apiKey: 'k' })
+      const registry = new ToolRegistry()
+      const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+      const events: AgentEvent[] = []
+      let state = initialTurnWaitState()
+
+      for await (const event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages,
+        context: { cwd: process.cwd(), signal: new AbortController().signal },
+      })) {
+        events.push(event)
+        state = reduceTurnWaitState(state, event)
+      }
+
+      expect(events.some((e) => e.type === 'reasoning-start' || e.type === 'reasoning-end')).toBe(false)
+      expect(events).toContainEqual({ type: 'reasoning-delta', delta: 'post-hoc summary', replayed: true })
+      expect(finalThoughtMs(state)).toBeUndefined()
+      expect(messages[1]?.content).toContainEqual(expect.objectContaining({ type: 'reasoning', text: 'post-hoc summary' }))
+      expect(messages[1]?.content).toContainEqual({ type: 'text', text: 'final answer' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('streams Anthropic and Responses reasoning in runAgent with live Thinking boundaries and no client-clock duration', async () => {
+    vi.useFakeTimers()
+    try {
+      const anthropicStream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const enc = new TextEncoder()
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'pondering' } })}\n\n`))
+          await new Promise((r) => setTimeout(r, 1200))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'done' } })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })}\n\n`))
+          controller.close()
+        },
+      })
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(anthropicStream, { status: 200, headers: { 'content-type': 'text/event-stream' } })))
+
+      const anthropic = new AnthropicProvider({ id: 'anthropic', baseURL: 'https://a.test/v1', apiKey: 'k' })
+      const registry = new ToolRegistry()
+      const anthropicMessages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+      const aEvents: AgentEvent[] = []
+      let aState = initialTurnWaitState()
+      const runA = (async () => {
+        for await (const e of runAgent({
+          provider: anthropic,
+          model: 'claude-test',
+          tools: registry.specs(),
+          registry,
+          messages: anthropicMessages,
+          context: { cwd: process.cwd(), signal: new AbortController().signal },
+        })) {
+          aEvents.push(e)
+          aState = reduceTurnWaitState(aState, e)
+        }
+      })()
+      await vi.advanceTimersByTimeAsync(1200)
+      await runA
+      expect(aEvents.map((e) => e.type)).toEqual([
+        'response-waiting',
+        'reasoning-start',
+        'reasoning-delta',
+        'reasoning-end',
+        'text-delta',
+        'done',
+      ])
+      expect(aEvents.find((e) => e.type === 'reasoning-end')).toEqual({ type: 'reasoning-end' })
+      expect(finalThoughtMs(aState)).toBeUndefined()
+      expect(anthropicMessages[1]?.content).toContainEqual({ type: 'reasoning', text: 'pondering' })
+
+      const responsesStream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const enc = new TextEncoder()
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'response.output_item.added', item: { type: 'reasoning', id: 'rs_1' } })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'response.reasoning_summary_text.delta', delta: 'summary' })}\n\n`))
+          await new Promise((r) => setTimeout(r, 1200))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'response.output_item.done', item: { type: 'reasoning', id: 'rs_1' } })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'done' })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [] } })}\n\n`))
+          controller.close()
+        },
+      })
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(responsesStream, { status: 200, headers: { 'content-type': 'text/event-stream' } })))
+
+      const responses = new ResponsesProvider({ id: 'chatgpt', baseURL: 'https://example.test', apiKey: 'k' })
+      const rEvents: AgentEvent[] = []
+      const runR = (async () => {
+        for await (const e of runAgent({
+          provider: responses,
+          model: 'm',
+          tools: registry.specs(),
+          registry,
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+          context: { cwd: process.cwd(), signal: new AbortController().signal },
+        })) rEvents.push(e)
+      })()
+      await vi.advanceTimersByTimeAsync(1200)
+      await runR
+      expect(rEvents).toContainEqual({ type: 'reasoning-start' })
+      expect(rEvents.find((e) => e.type === 'reasoning-end')).toEqual({ type: 'reasoning-end' })
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
+
+  it('invalidates prior explicit provider duration when a subsequent retry interrupts reasoning mid-turn', async () => {
+    vi.useFakeTimers()
+    try {
+      let stepCall = 0
+      const provider: Provider = {
+        id: 'retry-after-thinking',
+        async *stream(): AsyncGenerator<StreamEvent> {
+          stepCall += 1
+          if (stepCall === 1) {
+            yield { type: 'reasoning-start' }
+            yield { type: 'reasoning-end', durationMs: 1500 }
+            yield { type: 'tool-call', id: 'c1', name: 'noop', args: {} }
+            yield { type: 'done', finishReason: 'tool_calls' }
+            return
+          }
+          if (stepCall === 2) {
+            yield { type: 'reasoning-start' }
+            yield { type: 'reasoning', delta: 'half thought' }
+            throw new Error('ECONNRESET')
+          }
+          yield { type: 'reasoning-start' }
+          yield { type: 'reasoning-end', durationMs: 1200 }
+          yield { type: 'text', delta: 'recovered' }
+          yield { type: 'done', finishReason: 'stop' }
+        },
+      }
+      const registry = new ToolRegistry()
+      registry.register({
+        name: 'noop',
+        description: 'noop',
+        schema: z.object({}),
+        async execute() { return { content: 'ok' } },
+      })
+
+      let state = initialTurnWaitState()
+      const driving = (async () => {
+        for await (const event of runAgent({
+          provider,
+          model: 'm',
+          tools: registry.specs(),
+          registry,
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+          context: { cwd: process.cwd(), signal: new AbortController().signal },
+        })) {
+          state = reduceTurnWaitState(state, event)
+        }
+      })()
+      await vi.advanceTimersByTimeAsync(2500)
+      await driving
+
+      expect(state.hasUnobservedReasoning).toBe(true)
+      expect(finalThoughtMs(state)).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

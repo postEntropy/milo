@@ -155,9 +155,11 @@ describe('buildSystemPrompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT).toMatch(/one look, not an instrument/i)
   })
 
-  it('does not poll a background job it is told about when it ends', () => {
-    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/told when a job ends/i)
-    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/do not poll it/i)
+  it('waits in the same turn with job_wait instead of polling or ending the turn early', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/do not poll a background job/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/wait with `job_wait`/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/do not end a turn with\s+a promise to continue later/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/detach: true/i)
   })
 
   it('prefers the dedicated tool to a shell command that does the same', () => {

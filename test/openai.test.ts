@@ -260,4 +260,29 @@ describe('OpenAIProvider', () => {
       collect(new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' })),
     ).rejects.toThrow('Provider request failed (400 Bad Request): the model is not enabled')
   })
+
+  it('signals reasoning boundaries only when reasoning tokens stream and closes before tool buffering or text', async () => {
+    stubFetch([
+      frame({ choices: [{ delta: { reasoning_content: 'thinking' } }] }),
+      frame({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read_file', arguments: '{"path":"a"}' } }] } }] }),
+      frame({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+      'data: [DONE]\n\n',
+    ])
+    const withTools = await collect(new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' }))
+    expect(withTools).toEqual([
+      { type: 'reasoning-start' },
+      { type: 'reasoning', delta: 'thinking' },
+      { type: 'reasoning-end' },
+      { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'a' } },
+      { type: 'done', finishReason: 'tool_calls' },
+    ])
+
+    stubFetch([
+      frame({ choices: [{ delta: { content: 'plain answer' } }] }),
+      frame({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+      'data: [DONE]\n\n',
+    ])
+    const plain = await collect(new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' }))
+    expect(plain.some((e) => e.type === 'reasoning-start' || e.type === 'reasoning-end')).toBe(false)
+  })
 })

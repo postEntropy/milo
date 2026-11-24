@@ -69,6 +69,17 @@ export class JobManager {
   private closing = false
   private readonly changeListeners = new Set<() => void>()
   private readonly settledListeners = new Set<(job: JobInfo) => void>()
+  /** Internal settlement listeners that always fire immediately (for `job_wait` and turn continuation). */
+  private readonly waitListeners = new Set<(job: JobInfo) => void>()
+  /** Active turns (`turnId -> sessionId`) so out-of-band announcements wait until the turn finishes or is bypassed if consumed. */
+  private readonly activeTurns = new Map<string, string | undefined>()
+  /** Count of active turns per session, preventing premature announcements across turns of the same session. */
+  private readonly activeSessionCounts = new Map<string, number>()
+  /** Settled jobs whose out-of-band announcement was deferred while their turn or session was active. */
+  private readonly deferredByTurn = new Map<string, JobRecord[]>()
+  private readonly deferredBySession = new Map<string, JobRecord[]>()
+  /** Jobs whose final result was already delivered to a turn in-band (no duplicate post-turn notice). */
+  private readonly consumedJobs = new Set<string>()
   /** State writes still in flight, so `close()` can drain them before exiting. */
   private readonly pendingMeta = new Set<Promise<void>>()
 
@@ -101,6 +112,8 @@ export class JobManager {
       notify: input.notify ?? 'auto',
       origin: input.origin,
       sessionId: input.sessionId,
+      ...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+      ...(input.detached ? { detached: true } : {}),
       state: 'running',
       startedAt: Date.now(),
       logPath: jobLogFile(id),
@@ -203,6 +216,104 @@ export class JobManager {
     return () => this.settledListeners.delete(listener)
   }
 
+  /** Called immediately when any job settles, even while a turn is active. */
+  onAnySettled(listener: (job: JobInfo) => void): () => void {
+    this.waitListeners.add(listener)
+    return () => this.waitListeners.delete(listener)
+  }
+
+  /** Registers an active turn so job completions are coordinated with it rather than racing it. */
+  beginTurn(turnId: string, sessionId?: string): void {
+    if (this.activeTurns.has(turnId)) return
+    this.activeTurns.set(turnId, sessionId)
+    if (sessionId) {
+      this.activeSessionCounts.set(sessionId, (this.activeSessionCounts.get(sessionId) ?? 0) + 1)
+    }
+  }
+
+  /** Marks a settled job as already delivered to a turn, suppressing duplicate post-turn announcements. */
+  consume(id: string): boolean {
+    if (this.consumedJobs.has(id)) return false
+    this.consumedJobs.add(id)
+    if (this.consumedJobs.size > 500) {
+      for (const known of this.consumedJobs) {
+        if (!this.jobs.has(known)) this.consumedJobs.delete(known)
+      }
+    }
+    return true
+  }
+
+  /** Whether a job's completion was already delivered inside a turn. */
+  isConsumed(id: string): boolean {
+    return this.consumedJobs.has(id)
+  }
+
+  /** Running jobs started in `turnId` (excluding detached jobs by default). */
+  runningForTurn(turnId: string, options: { includeDetached?: boolean } = {}): JobInfo[] {
+    const includeDetached = options.includeDetached ?? false
+    return [...this.jobs.values()]
+      .filter((job) => job.turnId === turnId && job.state === 'running' && (includeDetached || !job.detached))
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map((job) => this.info(job))
+  }
+
+  /** Settled jobs started in `turnId` whose outcome has not yet been delivered to the turn. */
+  unconsumedSettledForTurn(turnId: string, options: { includeDetached?: boolean } = {}): JobInfo[] {
+    const includeDetached = options.includeDetached ?? false
+    return [...this.jobs.values()]
+      .filter(
+        (job) =>
+          job.turnId === turnId &&
+          job.state !== 'running' &&
+          !this.consumedJobs.has(job.id) &&
+          (includeDetached || !job.detached),
+      )
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map((job) => this.info(job))
+  }
+
+  /**
+   * Ends an active turn. On abort, kills any still-running non-detached jobs
+   * belonging to the turn and suppresses their post-turn announcements; otherwise
+   * flushes any deferred unconsumed announcements once the session is free.
+   */
+  endTurn(turnId: string, options: { aborted?: boolean } = {}): void {
+    if (!this.activeTurns.has(turnId)) return
+    const sessionId = this.activeTurns.get(turnId)
+    this.activeTurns.delete(turnId)
+    if (sessionId) {
+      const remaining = (this.activeSessionCounts.get(sessionId) ?? 1) - 1
+      if (remaining > 0) this.activeSessionCounts.set(sessionId, remaining)
+      else this.activeSessionCounts.delete(sessionId)
+    }
+
+    if (options.aborted) {
+      for (const job of this.jobs.values()) {
+        if (job.turnId === turnId && !job.detached && job.state === 'running') {
+          this.consume(job.id)
+          this.kill(job.id)
+        }
+      }
+    }
+
+    const turnDeferred = this.deferredByTurn.get(turnId) ?? []
+    this.deferredByTurn.delete(turnId)
+    for (const job of turnDeferred) {
+      if (this.consumedJobs.has(job.id)) continue
+      if (options.aborted && !job.detached) continue
+      this.dispatchOrDeferSession(job)
+    }
+
+    if (sessionId && (this.activeSessionCounts.get(sessionId) ?? 0) === 0) {
+      const sessionDeferred = this.deferredBySession.get(sessionId) ?? []
+      this.deferredBySession.delete(sessionId)
+      for (const job of sessionDeferred) {
+        if (this.consumedJobs.has(job.id)) continue
+        if (job.spawned) this.notify(job)
+      }
+    }
+  }
+
   /** Stops everything still running and writes the last state. The way out. */
   async close(): Promise<void> {
     this.closing = true
@@ -265,7 +376,38 @@ export class JobManager {
     job.child = null
     this.trackMeta(job)
     this.emitChange()
-    if (job.spawned) this.notify(job)
+    this.emitWaitSettled(job)
+    if (job.spawned && !this.closing && !this.consumedJobs.has(job.id)) {
+      if (job.turnId && this.activeTurns.has(job.turnId)) {
+        const list = this.deferredByTurn.get(job.turnId) ?? []
+        list.push(job)
+        this.deferredByTurn.set(job.turnId, list)
+      } else {
+        this.dispatchOrDeferSession(job)
+      }
+    }
+  }
+
+  private dispatchOrDeferSession(job: JobRecord): void {
+    if (this.closing || !job.spawned || this.consumedJobs.has(job.id)) return
+    if (job.sessionId && (this.activeSessionCounts.get(job.sessionId) ?? 0) > 0) {
+      const list = this.deferredBySession.get(job.sessionId) ?? []
+      list.push(job)
+      this.deferredBySession.set(job.sessionId, list)
+      return
+    }
+    this.notify(job)
+  }
+
+  private emitWaitSettled(job: JobRecord): void {
+    const info = this.info(job)
+    for (const listener of this.waitListeners) {
+      try {
+        listener(info)
+      } catch (error) {
+        logWarn(`job wait listener failed: ${errorMessage(error)}`)
+      }
+    }
   }
 
   private terminate(job: JobRecord): void {
@@ -324,6 +466,8 @@ export class JobManager {
       notify: job.notify,
       origin: job.origin,
       sessionId: job.sessionId,
+      ...(job.turnId !== undefined ? { turnId: job.turnId } : {}),
+      ...(job.detached !== undefined ? { detached: job.detached } : {}),
       state: job.state,
       startedAt: job.startedAt,
       endedAt: job.endedAt,
@@ -350,6 +494,8 @@ export class JobManager {
       notify: job.notify,
       origin: job.origin,
       sessionId: job.sessionId,
+      ...(job.turnId !== undefined ? { turnId: job.turnId } : {}),
+      ...(job.detached !== undefined ? { detached: job.detached } : {}),
       state: job.state,
       startedAt: job.startedAt,
       endedAt: job.endedAt,
@@ -417,6 +563,8 @@ export class JobManager {
         notify: (parsed.notify as JobNotify) ?? 'auto',
         origin: readScope(parsed.origin) ?? { gateway: 'local', chatId: 'install' },
         sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
+        ...(typeof parsed.turnId === 'string' ? { turnId: parsed.turnId } : {}),
+        ...(typeof parsed.detached === 'boolean' ? { detached: parsed.detached } : {}),
         state: (parsed.state as JobState) ?? 'error',
         startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
         endedAt: typeof parsed.endedAt === 'number' ? parsed.endedAt : undefined,

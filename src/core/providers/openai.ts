@@ -128,11 +128,16 @@ export class OpenAIProvider implements Provider {
     // finish reason. A body that ends without either stopped mid-token, and the
     // last words read as a finished answer would hide the cut.
     let finished = false
+    let inReasoning = false
     let contentChars = 0
     let reasoningChars = 0
 
     for await (const message of parseSSE(response.body)) {
       if (message.data === '[DONE]') {
+        if (inReasoning) {
+          inReasoning = false
+          yield { type: 'reasoning-end' }
+        }
         finished = true
         break
       }
@@ -160,11 +165,6 @@ export class OpenAIProvider implements Provider {
       if (!choice) continue
       const delta = choice.delta ?? {}
 
-      if (typeof delta.content === 'string' && delta.content) {
-        contentChars += delta.content.length
-        yield { type: 'text', delta: delta.content }
-      }
-
       // An empty `reasoning_content` is a provider filling the field in, not a
       // thought: taking it would mask a sibling `reasoning` that carries one —
       // which is how a thought goes missing on the wire that looks like it
@@ -176,11 +176,28 @@ export class OpenAIProvider implements Provider {
             ? delta.reasoning
             : ''
       if (reasoning) {
+        if (!inReasoning) {
+          inReasoning = true
+          yield { type: 'reasoning-start' }
+        }
         reasoningChars += reasoning.length
         yield { type: 'reasoning', delta: reasoning }
       }
 
-      if (Array.isArray(delta.tool_calls)) {
+      if (typeof delta.content === 'string' && delta.content) {
+        if (inReasoning) {
+          inReasoning = false
+          yield { type: 'reasoning-end' }
+        }
+        contentChars += delta.content.length
+        yield { type: 'text', delta: delta.content }
+      }
+
+      if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
+        if (inReasoning) {
+          inReasoning = false
+          yield { type: 'reasoning-end' }
+        }
         for (const call of delta.tool_calls) {
           const index: number = call.index ?? 0
           const current = pending.get(index) ?? { id: '', name: '', args: '' }
@@ -192,6 +209,10 @@ export class OpenAIProvider implements Provider {
       }
 
       if (choice.finish_reason) {
+        if (inReasoning) {
+          inReasoning = false
+          yield { type: 'reasoning-end' }
+        }
         finish = mapFinishReason(choice.finish_reason)
         finished = true
       }
@@ -199,6 +220,10 @@ export class OpenAIProvider implements Provider {
 
     if (!finished) {
       throw new Error('the provider stream ended before the message was complete')
+    }
+
+    if (inReasoning) {
+      yield { type: 'reasoning-end' }
     }
 
     if (pending.size > 0) {

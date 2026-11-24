@@ -840,8 +840,28 @@ class SlowProvider implements Provider {
   }
 }
 
+class ObservableReasoningProvider implements Provider {
+  readonly id = 'reasoning-test'
+  readonly name = 'Reasoning test'
+
+  constructor(
+    private readonly preLatencyMs: number,
+    private readonly reasoningMs: number,
+  ) {}
+
+  async *stream(): AsyncGenerator<StreamEvent> {
+    await new Promise((resolve) => setTimeout(resolve, this.preLatencyMs))
+    yield { type: 'reasoning-start' }
+    yield { type: 'reasoning', delta: 'thinking...' }
+    await new Promise((resolve) => setTimeout(resolve, this.reasoningMs))
+    yield { type: 'reasoning-end' }
+    yield { type: 'text', delta: 'done' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
 describe('how long a turn took to say anything', () => {
-  it('writes the wait on the turn, so a session read back says it too', async () => {
+  it('does not attribute request or provider latency to thinking when no reasoning is observed', async () => {
     vi.useFakeTimers()
     try {
       const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
@@ -870,13 +890,61 @@ describe('how long a turn took to say anything', () => {
       await driving
 
       const messages = (await store.load(record.id))!.messages
-      // The question carries no wait; the turn's own answer carries it, and it is the
-      // number the live surfaces draw — the reload says the same thing.
       expect(messages[0]?.thoughtMs).toBeUndefined()
-      expect(messages[1]?.thoughtMs).toBe(1500)
+      expect(messages[1]?.thoughtMs).toBeUndefined()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('omits client-clock duration for streamed reasoning without explicit provider durationMs, while preserving reasoning content', async () => {
+    vi.useFakeTimers()
+    try {
+      const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+      const store = new MemorySessionStore()
+      const record = await store.create()
+      const scope: MemoryScope = { gateway: 'cli', chatId: 't-reasoning' }
+      const session = new Session({
+        model: 'test-model',
+        system: 'BASE',
+        registry: createToolRegistry(),
+        memory: new SqliteMemory({ dir }),
+        store,
+        scope,
+        record,
+        cwd: process.cwd(),
+        provider: new ObservableReasoningProvider(2000, 1500),
+        maxSteps: 4,
+      })
+
+      const driving = (async () => {
+        for await (const _event of session.send('think first')) {
+          // drain
+        }
+      })()
+      await vi.advanceTimersByTimeAsync(3500)
+      await driving
+
+      const messages = (await store.load(record.id))!.messages
+      expect(messages[0]?.thoughtMs).toBeUndefined()
+      expect(messages[1]?.thoughtMs).toBeUndefined()
+      expect(messages[1]?.content).toContainEqual({ type: 'reasoning', text: 'thinking...' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves historical thoughtMs already stored on disk across reloads without recomputing it', async () => {
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    record.messages.push(
+      { role: 'user', content: [{ type: 'text', text: 'earlier' }] },
+      { role: 'assistant', content: [{ type: 'reasoning', text: 'old thought' }, { type: 'text', text: 'old answer' }], thoughtMs: 2400 },
+    )
+    await store.save(record, record.version)
+
+    const loaded = (await store.load(record.id))!
+    expect(loaded.messages[1]?.thoughtMs).toBe(2400)
   })
 
   it('leaves nothing behind when the turn answered at once', async () => {
@@ -884,6 +952,41 @@ describe('how long a turn took to say anything', () => {
 
     // Under a second there is nothing worth saying, live or on a reload.
     expect((await store.load(record.id))!.messages[1]?.thoughtMs).toBeUndefined()
+  })
+
+  it('persists replayed post-hoc reasoning summaries without inventing thoughtMs', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const scope: MemoryScope = { gateway: 'cli', chatId: 't-replayed' }
+    const replayedProvider: Provider = {
+      id: 'replayed-test',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        yield { type: 'reasoning', delta: 'post-hoc summary', replayed: true }
+        yield { type: 'text', delta: 'answer' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope,
+      record,
+      cwd: process.cwd(),
+      provider: replayedProvider,
+      maxSteps: 4,
+    })
+
+    for await (const _event of session.send('summarize')) {
+      // drain
+    }
+
+    const messages = (await store.load(record.id))!.messages
+    expect(messages[1]?.thoughtMs).toBeUndefined()
+    expect(messages[1]?.content).toContainEqual({ type: 'reasoning', text: 'post-hoc summary' })
   })
 })
 

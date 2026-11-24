@@ -1,7 +1,15 @@
+import { randomUUID } from 'node:crypto'
 import { errorMessage, isAbort } from '../../util/errors.js'
 import { sanitizeToolArgsForPersistence } from '../computer/sanitize.js'
 import { isComputerToolName, toActInput, type ComputerActArgs } from '../computer/tools.js'
 import { saveImage } from '../images.js'
+import { SECRET_REDACTED_NOTICE, redactSecrets, redactSecretsInValue } from '../secrets.js'
+import {
+  formatTurnJobContinuation,
+  waitForJobs,
+  type JobInfo,
+  type JobManager,
+} from '../jobs/index.js'
 import { describeWhen } from '../routines.js'
 import { sleep } from '../providers/retry.js'
 import { thinkingBudgetFor } from '../providers/thinking.js'
@@ -190,6 +198,19 @@ const STOPPED_CALL_RESULT = 'The turn was stopped before this call ran.'
 export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentEvent> {
   const { provider, registry, messages, context } = options
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
+  const jobs = context.jobs
+  const turnId = context.turnId ?? (jobs ? randomUUID() : undefined)
+  const hasSteering = options.steering ? () => options.steering!.length > 0 : context.hasSteering
+  const toolContext: ToolContext = {
+    ...context,
+    ...(turnId !== undefined ? { turnId } : {}),
+    ...(hasSteering !== undefined ? { hasSteering } : {}),
+  }
+  const trackTurnJobs = Boolean(jobs && turnId)
+  const waitSignal =
+    options.signal && options.signal !== toolContext.signal
+      ? AbortSignal.any([options.signal, toolContext.signal])
+      : (options.signal ?? toolContext.signal)
   // Stamped on every request this run makes, so the provider wrapper's line names
   // the purpose and the surface instead of guessing at them.
   const tag: TraceTag | undefined = options.trace
@@ -201,13 +222,32 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       }
     : undefined
 
+  if (trackTurnJobs) jobs!.beginTurn(turnId!, toolContext.sessionId)
   try {
   for (let step = 0; step < maxSteps; step += 1) {
+    if (step > 0 && (options.signal?.aborted || toolContext.signal.aborted)) {
+      throw abortError()
+    }
     // A message sent while this turn was running joins it here, at the one point
     // where the transcript is not halfway through a tool call.
     for (const steer of take(options.steering)) {
-      messages.push({ role: 'user', content: [{ type: 'text', text: steer }], at: Date.now() })
-      yield { type: 'steer', text: steer }
+      const { text: cleanSteer, redacted } = redactSecrets(steer)
+      messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: cleanSteer }],
+        ...(redacted ? { mediaNotices: [SECRET_REDACTED_NOTICE] } : {}),
+        at: Date.now(),
+      })
+      yield { type: 'steer', text: cleanSteer }
+      if (redacted) {
+        yield { type: 'text-delta', delta: `⚠ ${SECRET_REDACTED_NOTICE}\n\n` }
+      }
+    }
+    if (trackTurnJobs) {
+      const settled = consumeSettledTurnJobs(jobs!, turnId!)
+      if (settled.length > 0) {
+        messages.push(turnJobMessage(settled, jobs!.runningForTurn(turnId!)))
+      }
     }
 
     const parts: ContentPart[] = []
@@ -222,7 +262,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     dropOldSnapshots(messages, options.keepSnapshots)
 
     for (let attempt = 0; ; attempt += 1) {
+      const reasoningTracker = createReasoningTracker()
       try {
+        yield { type: 'response-waiting' }
         // A block is written where the prose is, so it is split out of the stream
         // here, at the one place every surface listens. Fresh per request, not per
         // turn: a block left open when a request ends belongs to that request, and
@@ -243,7 +285,29 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           signal: options.signal,
           ...(tag ? { trace: tag } : {}),
         })) {
-          if (event.type === 'text') {
+          if (event.type === 'reasoning-start') {
+            const started = reasoningTracker.start()
+            if (started) yield started
+          } else if (event.type === 'reasoning') {
+            if (event.replayed) {
+              const closed = reasoningTracker.end()
+              if (closed) yield closed
+              reasoning += event.delta
+              yield { type: 'reasoning-delta', delta: event.delta, replayed: true }
+            } else {
+              const started = reasoningTracker.start()
+              if (started) yield started
+              reasoning += event.delta
+              yield { type: 'reasoning-delta', delta: event.delta }
+            }
+          } else if (event.type === 'reasoning-end') {
+            const closed = reasoningTracker.end(event.durationMs)
+            if (closed) yield closed
+          } else if (event.type === 'reasoning-signature') {
+            signature = event.signature
+          } else if (event.type === 'text') {
+            const closed = reasoningTracker.end()
+            if (closed) yield closed
             // The transcript keeps the answer as the model wrote it, block and all:
             // its own words are what the next request should see. Only what the
             // surface is handed is split.
@@ -253,24 +317,27 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
             } else {
               yield { type: 'text-delta', delta: event.delta }
             }
-          } else if (event.type === 'reasoning') {
-            reasoning += event.delta
-            yield { type: 'reasoning-delta', delta: event.delta }
-          } else if (event.type === 'reasoning-signature') {
-            signature = event.signature
           } else if (event.type === 'tool-call') {
+            const closed = reasoningTracker.end()
+            if (closed) yield closed
             toolCalls.push({ id: event.id, name: event.name, args: event.args })
           } else if (event.type === 'usage') {
             yield event
           } else if (event.type === 'done') {
+            const closed = reasoningTracker.end()
+            if (closed) yield closed
             finish = event.finishReason
           }
         }
+        const closed = reasoningTracker.end()
+        if (closed) yield closed
         if (fence) {
           for (const part of fenceEvents(fence.finish())) yield part
         }
         break
       } catch (error) {
+        const closed = reasoningTracker.end()
+        if (closed) yield closed
         // A stream can die on the way — a reset socket, a connection that was fine
         // a moment ago and is not now — after the provider had already taken the
         // request. Until the answer itself has started to go out, nothing of this
@@ -329,10 +396,47 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       messages.push({ role: 'assistant', content: parts, at: Date.now() })
     }
 
-    // No tool calls and nothing new to answer means the turn is over. A
-    // correction that landed while this step was streaming keeps it going
-    // instead: it is picked up at the top of the next step.
+    // No tool calls and nothing new to answer means the turn is over — unless
+    // this turn still has non-detached background jobs running or settled jobs
+    // whose result has not yet been delivered into this turn.
     if (toolCalls.length === 0 && (options.steering?.length ?? 0) === 0) {
+      if (trackTurnJobs) {
+        const earlySettled = consumeSettledTurnJobs(jobs!, turnId!)
+        if (earlySettled.length > 0) {
+          messages.push(turnJobMessage(earlySettled, jobs!.runningForTurn(turnId!)))
+          continue
+        }
+        const running = jobs!.runningForTurn(turnId!)
+        if (running.length > 0) {
+          const ids = running.map((job) => job.id)
+          const waitStarted = Date.now()
+          yield { type: 'job-waiting', ids }
+          const outcome = await waitForJobs(jobs!, ids, {
+            mode: 'any',
+            signal: waitSignal,
+            hasSteering,
+          })
+          if (outcome.kind === 'aborted') {
+            throw abortError()
+          }
+          if (outcome.kind === 'steered') {
+            const settledBeforeSteer = consumeSettledTurnJobs(jobs!, turnId!)
+            if (settledBeforeSteer.length > 0) {
+              messages.push(turnJobMessage(settledBeforeSteer, jobs!.runningForTurn(turnId!)))
+            }
+            yield { type: 'job-waited', ids, ms: Date.now() - waitStarted, reason: 'steered' }
+            continue
+          }
+          const settledNow = consumeSettledTurnJobs(jobs!, turnId!)
+          const delivered = settledNow.length > 0 ? settledNow : outcome.jobs
+          for (const job of delivered) jobs!.consume(job.id)
+          yield { type: 'job-waited', ids, ms: Date.now() - waitStarted, reason: 'settled' }
+          if (delivered.length > 0) {
+            messages.push(turnJobMessage(delivered, jobs!.runningForTurn(turnId!)))
+          }
+          continue
+        }
+      }
       yield { type: 'done', finishReason: finish }
       return
     }
@@ -370,17 +474,18 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         const record = (ok: boolean, extra: { output?: ToolResult; error?: string }): void => {
           options.trace?.traces.record({
             at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'tool.call', ok, ms: Date.now() - started,
-            purpose: tag?.purpose ?? 'chat', tool: call.name, callId: call.id, input: sanitizeToolArgsForPersistence(call.name, call.args),
+            purpose: tag?.purpose ?? 'chat', tool: call.name, callId: call.id, input: redactSecretsInValue(sanitizeToolArgsForPersistence(call.name, call.args)),
             ...(tag?.surface ? { surface: tag.surface } : {}),
             ...(tag?.session ? { session: tag.session } : {}),
             ...(tag?.turn ? { turn: tag.turn } : {}),
-            ...extra,
+            ...(extra.output ? { output: redactSecretsInValue(extra.output) as ToolResult } : {}),
+            ...(extra.error !== undefined ? { error: redactSecrets(extra.error).text } : {}),
           })
         }
         try {
           const result = tag
-            ? await withTraceContext({ turn: tag.turn, session: tag.session, surface: tag.surface, callId: call.id }, () => executeCall(options.permission, registry, call, context))
-            : await executeCall(options.permission, registry, call, context)
+            ? await withTraceContext({ turn: tag.turn, session: tag.session, surface: tag.surface, callId: call.id }, () => executeCall(options.permission, registry, call, toolContext))
+            : await executeCall(options.permission, registry, call, toolContext)
           const tracedOutput: ToolResult =
             result.persistedContent !== undefined || result.ephemeralImages || result.previewImage
               ? {
@@ -476,20 +581,52 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
   // is not something a surface can read.
   let rawClosing = ''
   const closingFence = options.genui ? new GenUiFence({ drafts: true }) : null
-  for await (const event of provider.stream({
-    model: options.model,
-    messages,
-    system: options.system ? `${options.system}\n\n${OUT_OF_STEPS}` : OUT_OF_STEPS,
-    tools: undefined,
-    temperature: options.temperature,
-    maxTokens: options.maxTokens,
-    reasoningEffort: options.reasoningEffort,
-    thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
-    signal: options.signal,
-    ...(tag ? { trace: tag } : {}),
-  })) {
-    if (event.type === 'text') rawClosing += event.delta
-    else if (event.type === 'reasoning') yield { type: 'reasoning-delta', delta: event.delta }
+  const closingReasoningTracker = createReasoningTracker()
+  yield { type: 'response-waiting' }
+  try {
+    for await (const event of provider.stream({
+      model: options.model,
+      messages,
+      system: options.system ? `${options.system}\n\n${OUT_OF_STEPS}` : OUT_OF_STEPS,
+      tools: undefined,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      reasoningEffort: options.reasoningEffort,
+      thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
+      signal: options.signal,
+      ...(tag ? { trace: tag } : {}),
+    })) {
+      if (event.type === 'reasoning-start') {
+        const started = closingReasoningTracker.start()
+        if (started) yield started
+      } else if (event.type === 'reasoning') {
+        if (event.replayed) {
+          const closed = closingReasoningTracker.end()
+          if (closed) yield closed
+          yield { type: 'reasoning-delta', delta: event.delta, replayed: true }
+        } else {
+          const started = closingReasoningTracker.start()
+          if (started) yield started
+          yield { type: 'reasoning-delta', delta: event.delta }
+        }
+      } else if (event.type === 'reasoning-end') {
+        const closed = closingReasoningTracker.end(event.durationMs)
+        if (closed) yield closed
+      } else if (event.type === 'text') {
+        const closed = closingReasoningTracker.end()
+        if (closed) yield closed
+        rawClosing += event.delta
+      } else if (event.type === 'done') {
+        const closed = closingReasoningTracker.end()
+        if (closed) yield closed
+      }
+    }
+    const closed = closingReasoningTracker.end()
+    if (closed) yield closed
+  } catch (error) {
+    const closed = closingReasoningTracker.end()
+    if (closed) yield closed
+    throw error
   }
   const closing = readableClosing(rawClosing)
   if (closing) {
@@ -509,7 +646,46 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       : `Stopped after ${maxSteps} steps without a final answer.`,
   }
   } finally {
+    if (trackTurnJobs) {
+      jobs!.endTurn(turnId!, { aborted: Boolean(options.signal?.aborted || toolContext.signal.aborted) })
+    }
     scrubEphemeralResults(messages)
+  }
+}
+
+function createReasoningTracker() {
+  let active = false
+
+  return {
+    start(): AgentEvent | null {
+      if (active) return null
+      active = true
+      return { type: 'reasoning-start' }
+    },
+    end(durationMs?: number): AgentEvent | null {
+      if (!active) return null
+      active = false
+      // Only carry a duration when explicitly provided by the provider protocol;
+      // client-side SSE timing is never presented as model thinking time.
+      const ms = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined
+      return ms !== undefined ? { type: 'reasoning-end', ms } : { type: 'reasoning-end' }
+    },
+  }
+}
+
+function consumeSettledTurnJobs(jobs: JobManager, turnId: string): JobInfo[] {
+  const settled = jobs.unconsumedSettledForTurn(turnId)
+  for (const job of settled) jobs.consume(job.id)
+  return settled
+}
+
+function turnJobMessage(settled: readonly JobInfo[], stillRunning: readonly JobInfo[]): Message {
+  return {
+    role: 'user',
+    internal: 'job',
+    displayText: '',
+    content: [{ type: 'text', text: formatTurnJobContinuation(settled, stillRunning) }],
+    at: Date.now(),
   }
 }
 

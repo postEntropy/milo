@@ -154,6 +154,8 @@ export interface ToolContext {
   jobs?: JobManager
   /** Unique id of the currently running turn, used to scope desktop window authorization. */
   turnId?: string
+  /** Whether user steering messages are waiting to be taken up at the next step boundary. */
+  hasSteering?: () => boolean
   /** True only when the active model has confirmed vision support. */
   visionConfirmed?: boolean
   /** False in Plan mode, routines, unattended delegation, and shared chats. */

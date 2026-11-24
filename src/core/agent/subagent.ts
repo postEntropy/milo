@@ -110,6 +110,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
         tool.name !== 'sessions' &&
         tool.name !== 'panel' &&
         tool.name !== 'job_status' &&
+        tool.name !== 'job_wait' &&
         tool.name !== 'job_kill' &&
         !isComputerToolName(tool.name),
     )

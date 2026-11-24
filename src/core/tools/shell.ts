@@ -20,13 +20,19 @@ const schema = z.object({
     .boolean()
     .optional()
     .describe(
-      'Run in the background and return a job id instead of waiting. For a long command; no timeout, and you are told when it ends.',
+      'Run in the background and return a job id instead of waiting. For a long command; no timeout.',
+    ),
+  detach: z
+    .boolean()
+    .optional()
+    .describe(
+      'Whether the background job is independent of this turn. Leave false (default) when the command is needed for the current task so Milo waits for its result and continues in the same turn without a separate duplicate notice; set true only for an independent command, server, or watcher the user asked to leave running after this turn.',
     ),
   notify: z
     .enum(['auto', 'always', 'never'])
     .optional()
     .describe(
-      'For a background job: who to tell when it ends. `always` if the person asked, `never` if they asked not to, `auto` (default) to decide then.',
+      'For an independent (`detach: true`) background job: controls the separate post-turn completion notification (`auto` default lets Milo decide, `always` notifies on completion, `never` suppresses success notifications while still reporting failures). Does not detach the job from the turn — to run an independent silent job, pass `detach: true` together with `notify: "never"`.',
     ),
 })
 
@@ -160,7 +166,9 @@ export const shellTool: Tool<ShellArgs> = {
   name: 'shell_command',
   description:
     'Run a shell command and return its combined stdout/stderr and exit code. Requires user confirmation. ' +
-    'A command that walks a large tree (`du`, `find` over a whole disk) can outlast the default and be killed at the timeout — bound it with `timeout`, raise `timeoutMs`, or set `background` for a long command: it returns a job id at once and keeps running. A background job tells you when it ends — do not poll it; `job_status` is for output you need now, not for waiting.',
+    'A command that walks a large tree (`du`, `find` over a whole disk) can outlast the default and be killed at the timeout — bound it with `timeout`, raise `timeoutMs`, or set `background: true` for a long command (no timeout). ' +
+    'By default (`detach` false/omitted), a background job belongs to this turn: Milo waits for its result with `job_wait` (or before finishing the turn) and continues in the same turn without a separate duplicate notice. ' +
+    'Set `detach: true` only for an independent server or background job the person asked to leave running after the turn; `notify` (`auto`, `always`, `never`) applies only to that separate post-turn notice (use `detach: true` with `notify: "never"` for a silent independent job; failures are still reported).',
   schema,
   readOnly: false,
   async execute(args, ctx): Promise<ToolResult> {
@@ -185,19 +193,25 @@ export const shellTool: Tool<ShellArgs> = {
       }
     }
     if (args.background && canBackground) {
+      const detached = Boolean(args.detach)
       const started = ctx.jobs!.start({
         command: args.command,
         cwd,
         origin: ctx.origin ?? { gateway: 'local', chatId: 'install' },
         sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
         notify: args.notify,
+        detached,
       })
       if (!started.ok) return { content: started.error, isError: true }
       return {
-        content:
-          `Started job ${started.job.id}: ${args.command}\n` +
-          'It runs in the background — the person sees it in the job indicator. ' +
-          'Check on it with job_status, stop it with job_kill. You will be told when it ends.',
+        content: detached
+          ? `Started independent background job ${started.job.id}: ${args.command}\n` +
+            'It runs in the background — the person sees it in the job indicator. ' +
+            'Check on it with job_status, stop it with job_kill. You will be told when it ends.'
+          : `Started job ${started.job.id}: ${args.command}\n` +
+            'It runs in the background — the person sees it in the job indicator. ' +
+            'Call job_wait when you need its result to continue, or do independent work first; this turn will stay active until it finishes.',
       }
     }
 

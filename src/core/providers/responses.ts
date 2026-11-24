@@ -135,11 +135,16 @@ export class ResponsesProvider implements Provider {
     let finished = false
     let finish: FinishReason = 'stop'
     let sawTool = false
+    let inReasoning = false
     let contentChars = 0
     let reasoningChars = 0
 
     for await (const message of parseSSE(response.body)) {
       if (message.data === '[DONE]') {
+        if (inReasoning) {
+          inReasoning = false
+          yield { type: 'reasoning-end' }
+        }
         finished = true
         break
       }
@@ -162,6 +167,10 @@ export class ResponsesProvider implements Provider {
         case 'response.output_text.delta':
         case 'response.refusal.delta': {
           if (typeof event.delta === 'string' && event.delta) {
+            if (inReasoning) {
+              inReasoning = false
+              yield { type: 'reasoning-end' }
+            }
             contentChars += event.delta.length
             yield { type: 'text', delta: event.delta }
           }
@@ -170,12 +179,20 @@ export class ResponsesProvider implements Provider {
         case 'response.reasoning_summary_text.delta':
         case 'response.reasoning_text.delta': {
           if (typeof event.delta === 'string' && event.delta) {
+            if (!inReasoning) {
+              inReasoning = true
+              yield { type: 'reasoning-start' }
+            }
             reasoningChars += event.delta.length
             yield { type: 'reasoning', delta: event.delta }
           }
           break
         }
         case 'response.function_call_arguments.delta': {
+          if (inReasoning) {
+            inReasoning = false
+            yield { type: 'reasoning-end' }
+          }
           const key = event.item_id ?? event.item?.id ?? ''
           const current = pending.get(key) ?? { arguments: '' }
           if (typeof event.delta === 'string') current.arguments += event.delta
@@ -183,6 +200,10 @@ export class ResponsesProvider implements Provider {
           break
         }
         case 'response.function_call_arguments.done': {
+          if (inReasoning) {
+            inReasoning = false
+            yield { type: 'reasoning-end' }
+          }
           const key = event.item_id ?? event.item?.id ?? ''
           const current = pending.get(key) ?? { arguments: '' }
           if (typeof event.delta === 'string') current.arguments = event.delta
@@ -191,33 +212,58 @@ export class ResponsesProvider implements Provider {
         }
         case 'response.output_item.added': {
           const item = event.item
-          if (item?.type === 'function_call' && item.id) {
-            pending.set(item.id, {
-              name: item.name,
-              arguments: typeof item.arguments === 'string' ? item.arguments : '',
-            })
+          if (item?.type === 'reasoning') {
+            if (!inReasoning) {
+              inReasoning = true
+              yield { type: 'reasoning-start' }
+            }
+          } else {
+            if (inReasoning) {
+              inReasoning = false
+              yield { type: 'reasoning-end' }
+            }
+            if (item?.type === 'function_call' && item.id) {
+              pending.set(item.id, {
+                name: item.name,
+                arguments: typeof item.arguments === 'string' ? item.arguments : '',
+              })
+            }
           }
           break
         }
         case 'response.output_item.done': {
           if (event.item) {
+            const wasActiveReasoningItem = event.item.type === 'reasoning' && inReasoning
+            if (event.item.type !== 'reasoning' && inReasoning) {
+              inReasoning = false
+              yield { type: 'reasoning-end' }
+            }
             for (const outgoing of itemEvents(
               event.item,
               pending,
               emitted,
               contentChars === 0,
               reasoningChars === 0,
+              !wasActiveReasoningItem,
             )) {
               if (outgoing.type === 'text') contentChars += outgoing.delta.length
               if (outgoing.type === 'reasoning') reasoningChars += outgoing.delta.length
               if (outgoing.type === 'tool-call') sawTool = true
               yield outgoing
             }
+            if (wasActiveReasoningItem) {
+              inReasoning = false
+              yield { type: 'reasoning-end' }
+            }
           }
           break
         }
         case 'response.completed':
         case 'response.incomplete': {
+          if (inReasoning) {
+            inReasoning = false
+            yield { type: 'reasoning-end' }
+          }
           finished = true
           const payload = event.response
           if (payload?.usage) {
@@ -240,6 +286,7 @@ export class ResponsesProvider implements Provider {
               emitted,
               contentChars === 0,
               reasoningChars === 0,
+              true,
             )) {
               if (outgoing.type === 'text') contentChars += outgoing.delta.length
               if (outgoing.type === 'reasoning') reasoningChars += outgoing.delta.length
@@ -256,6 +303,10 @@ export class ResponsesProvider implements Provider {
 
     if (!finished) {
       throw new Error('the provider stream ended before the message was complete')
+    }
+
+    if (inReasoning) {
+      yield { type: 'reasoning-end' }
     }
 
     if (sawTool && finish === 'stop') finish = 'tool_calls'
@@ -330,6 +381,7 @@ function itemEvents(
   emitted: Set<string>,
   noTextYet: boolean,
   noReasoningYet: boolean,
+  replayedReasoning: boolean,
 ): StreamEvent[] {
   const out: StreamEvent[] = []
 
@@ -370,7 +422,7 @@ function itemEvents(
             : '',
         )
         .join('')
-      if (summary) out.push({ type: 'reasoning', delta: summary })
+      if (summary) out.push({ type: 'reasoning', delta: summary, ...(replayedReasoning ? { replayed: true } : {}) })
     }
     return out
   }

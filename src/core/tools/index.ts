@@ -160,8 +160,8 @@ export interface ToolRegistryOptions {
    */
   mcp?: McpServers | null
   /**
-   * The background jobs of this process. Its two tools — `job_status` and
-   * `job_kill` — are only registered when there is a manager behind them, so a
+   * The background jobs of this process. Its three tools — `job_status`, `job_wait`
+   * and `job_kill` — are only registered when there is a manager behind them, so a
    * caller with none never offers a job tool it cannot answer.
    */
   jobs?: JobManager | null

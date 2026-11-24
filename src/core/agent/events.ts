@@ -7,8 +7,11 @@ import type { ToolPreviewImage } from '../tools/types.js'
 import type { VerificationResult } from '../verification.js'
 
 export type AgentEvent =
+  | { type: 'response-waiting' }
+  | { type: 'reasoning-start' }
+  | { type: 'reasoning-delta'; delta: string; replayed?: boolean }
+  | { type: 'reasoning-end'; ms?: number }
   | { type: 'text-delta'; delta: string }
-  | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown }
   | {
       type: 'tool-end'
@@ -92,6 +95,16 @@ export type AgentEvent =
    * step boundary. The turn carries on with it — a correction, not a new turn.
    */
   | { type: 'steer'; text: string }
+  /**
+   * The turn is waiting on one or more non-detached background jobs it started
+   * before continuing the task in the same turn.
+   */
+  | { type: 'job-waiting'; ids: string[] }
+  /**
+   * That job wait ended (because a job settled or user steering arrived) and the
+   * turn is resuming.
+   */
+  | { type: 'job-waited'; ids: string[]; ms: number; reason: 'settled' | 'steered' }
   /**
    * What the project's own checks answered after a turn that wrote. Display
    * state, like the plan: the model is not told, and it is not part of the

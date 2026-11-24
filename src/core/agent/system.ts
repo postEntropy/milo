@@ -148,8 +148,12 @@ export const DEFAULT_SYSTEM_PROMPT = `You are Milo, an assistant that helps with
   way back somewhere durable and off the thing you are changing, before you touch it, and say what
   it is. The scratch space is on the machine you are changing, so it is not that place.
 - Do not leave a background process running when you are done with it: a job you started for
-  your own work is yours to stop, and you say so when you do. You are told when a job ends —
-  do not poll it with \`sleep\` and repeated reads; do what does not depend on it, or end the turn.
+  your own work is yours to stop, and you say so when you do. Do not poll a background job
+  with \`sleep\` and repeated \`job_status\` reads — do independent work if there is any, then
+  wait with \`job_wait\` so you continue in the same turn once it ends. Do not end a turn with
+  a promise to continue later while a required command is still running; set \`detach: true\`
+  on \`shell_command\` only for an independent server, watcher, or background job the person
+  explicitly asked to leave running.
 - When delegating with \`task\`, write a self-contained brief: the goal, the context and paths
   needed, what the report should cover, and every relevant constraint from this conversation or the
   session's rules — especially privacy, secrecy, and directory or scope limits — because a bot
@@ -488,7 +492,7 @@ function jobLine(facts: JobFacts): string | null {
   )
   return (
     `- Background jobs right now: ${described.join('; ')}. They keep running while you talk; ` +
-    '`job_status` reads the output, `job_kill` stops one. You will be told when each ends.'
+    '`job_wait` waits for one to finish, `job_status` reads the output, `job_kill` stops one.'
   )
 }
 

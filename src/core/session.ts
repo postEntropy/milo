@@ -32,6 +32,8 @@ import { approvalKey, approvalScope, DefaultPermissionPolicy, isPlanTool, withAp
 import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
+import { finalThoughtMs, initialTurnWaitState, reduceTurnWaitState } from './agent/turn-state.js'
+import { SECRET_REDACTED_INSTRUCTION, SECRET_REDACTED_NOTICE, redactSecrets } from './secrets.js'
 import type { TraceWriter } from './traces.js'
 import { withTraceContext } from './trace-context.js'
 import { runSubagent } from './agent/subagent.js'
@@ -401,7 +403,7 @@ export function extractSessionUserDirectives(
 ): string[] {
   const raw: string[] = []
   for (const message of messages) {
-    if (message.role !== 'user') continue
+    if (message.role !== 'user' || message.internal) continue
     const text = message.content
       .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
       .map((part) => part.text.trim())
@@ -975,11 +977,19 @@ export class Session {
     yield* this.send(pendingTurn.input, { ...options, retryPendingId: pendingTurn.id })
   }
 
-  private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+  private async *turn(rawInput: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     if (this.record.backend?.kind === 'command-code') {
-      yield* this.commandCodeTurn(input, opts)
+      yield* this.commandCodeTurn(rawInput, opts)
       return
     }
+    const redactedInput = opts?.notice ? { text: rawInput, redacted: false } : redactSecrets(rawInput)
+    const input = redactedInput.text
+    const redactedDisplay = opts?.displayText !== undefined ? redactSecrets(opts.displayText) : undefined
+    const displayText = redactedDisplay?.text
+    const secretRedacted = redactedInput.redacted || Boolean(redactedDisplay?.redacted)
+    const mediaNotices = secretRedacted
+      ? [...(opts?.mediaNotices ?? []), SECRET_REDACTED_NOTICE]
+      : opts?.mediaNotices
     const {
       system,
       registry,
@@ -1184,7 +1194,10 @@ export class Session {
     // An instruction a turn is given rather than said — a notice with no message
     // behind it, or an aside beside one — rides the system prompt, so the
     // transcript never carries words nobody said.
-    const instruction = opts?.notice ?? opts?.aside
+    const instruction =
+      [opts?.notice ?? opts?.aside, secretRedacted ? SECRET_REDACTED_INSTRUCTION : undefined]
+        .filter(Boolean)
+        .join('\n\n') || undefined
     const turnSystem = instruction ? `${systemPrompt}\n\n${instruction}` : systemPrompt
     // What every request carries besides the transcript: the prompt, and the tool
     // schemas the wire sends beside it. The transcript count is measured against
@@ -1194,13 +1207,16 @@ export class Session {
     // Nothing the person said means nothing added to the transcript as theirs; the
     // instruction above is the whole of this turn's prompt.
     if (!opts?.notice) {
-      this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? []), ...(opts?.documents ?? [])], ...(opts?.displayText !== undefined ? { displayText: opts.displayText } : {}), ...(opts?.mediaNotices?.length ? { mediaNotices: opts.mediaNotices } : {}), at: Date.now() })
+      this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? []), ...(opts?.documents ?? [])], ...(displayText !== undefined ? { displayText } : {}), ...(mediaNotices?.length ? { mediaNotices } : {}), at: Date.now() })
       for (const document of [...(opts?.documents ?? []), ...(opts?.images ?? []).filter((image) => !image.derivedFromDocument)]) {
         this.record.attachments ??= []
         const attachments = this.record.attachments
         if (!attachments.some((part) => part.path === document.path && part.name === document.name)) attachments.push(document)
       }
       note({ kind: 'user', text: input })
+      if (secretRedacted) {
+        yield { type: 'text-delta', delta: `⚠ ${SECRET_REDACTED_NOTICE}\n\n` }
+      }
     }
 
     // The turn's one signal, one permission decision and one effort, shared by
@@ -1303,11 +1319,10 @@ export class Session {
     // request came from" then means that chat.
     const origin = opts?.origin ?? this.scope
 
-    // Where this turn's own first message will land, and how long the turn took to
-    // say anything: reasoning, prose and a call are all an output, and the first of
-    // them is what the line over a thought counts the wait to.
+    // Where this turn's own first message will land, and how long the model was
+    // observed reasoning during the turn.
     const firstNew = this.messages.length
-    let firstOutputMs: number | undefined
+    let waitState = initialTurnWaitState()
 
     let errored = false
 
@@ -1552,10 +1567,9 @@ export class Session {
         const runSystem = instruction ? `${botSystemPrompt}\n\n${instruction}` : botSystemPrompt
         const runMessages = targetBot ? [...baseMessages!] : this.messages
         const runStartIndex = targetBot ? runMessages.length : firstNew
-        const runStartedAt = targetBot ? Date.now() : startedAt
         let runAnswer = ''
         let runReasoning = ''
-        let runFirstOutputMs: number | undefined
+        let runWaitState = initialTurnWaitState()
         let runErrored = false
         let runErrorText: string | undefined
         let runAborted = false
@@ -1566,14 +1580,7 @@ export class Session {
         try {
           for (let attempt = 0; attempt < 2; attempt += 1) {
             for await (const event of runAgentWith(runProvider, runSystem, runMessages)) {
-              // Measured once, on the turn's first output of any kind, so a session read
-              // back reports the same wait the surface that watched it drew.
-              if (
-                runFirstOutputMs === undefined &&
-                (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
-              ) {
-                runFirstOutputMs = Date.now() - runStartedAt
-              }
+              runWaitState = reduceTurnWaitState(runWaitState, event)
               if (event.type === 'error') {
                 runErrored = true
                 runErrorText = event.message
@@ -1587,6 +1594,8 @@ export class Session {
                 // sentence in the log — and in an export, one paragraph.
                 runAnswer = closeParagraph(runAnswer)
                 running = { name: event.name, args: event.args }
+              } else if (event.type === 'job-waiting') {
+                runAnswer = closeParagraph(runAnswer)
               } else if (event.type === 'steer') {
                 note({ kind: 'user', text: event.text })
                 // For the same reason the opening message is written down before the
@@ -1689,13 +1698,13 @@ export class Session {
             if (!firstAssistant) firstAssistant = message
             lastAssistant = message
           }
+          const botThoughtMs = finalThoughtMs(runWaitState)
           if (
-            runFirstOutputMs !== undefined &&
-            runFirstOutputMs >= 1000 &&
+            botThoughtMs !== undefined &&
             firstAssistant &&
             firstAssistant.thoughtMs === undefined
           ) {
-            firstAssistant.thoughtMs = runFirstOutputMs
+            firstAssistant.thoughtMs = botThoughtMs
           }
           if (runErrored && runErrorText && !runAborted) {
             if (lastAssistant) {
@@ -1739,7 +1748,7 @@ export class Session {
         } else {
           answer = runAnswer
           reasoning = runReasoning
-          firstOutputMs = runFirstOutputMs
+          waitState = runWaitState
           errored = runErrored
         }
       }
@@ -1762,19 +1771,17 @@ export class Session {
         yield { type: 'error', message: errorMessage(error) }
       }
     } finally {
-      // The wait belongs to the turn's first message, and it is set before the persist
-      // below so a session read back carries the number the live turn drew. Only a wait
-      // worth reporting is written — the same under-a-second rule the surfaces draw by —
-      // so a reload says exactly what the live turn said and nothing more.
+      // Only an observed reasoning span worth reporting (>= 1s) is written on the
+      // turn's first assistant message so a reload matches what the live turn showed.
       if (targetBots.length === 0) {
         const first = this.messages[firstNew]
+        const thoughtMs = finalThoughtMs(waitState)
         if (
-          firstOutputMs !== undefined &&
-          firstOutputMs >= 1000 &&
+          thoughtMs !== undefined &&
           first?.role === 'assistant' &&
           first.thoughtMs === undefined
         ) {
-          first.thoughtMs = firstOutputMs
+          first.thoughtMs = thoughtMs
         }
         try {
           // Runs even when the consumer aborts, so the partial turn is on disk.
@@ -1842,7 +1849,9 @@ export class Session {
     }
   }
 
-  private async *commandCodeTurn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+  private async *commandCodeTurn(rawInput: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+    const redactedInput = opts?.retryPendingId ? { text: rawInput, redacted: false } : redactSecrets(rawInput)
+    const input = redactedInput.text
     const driver = this.options.commandCode
     if (!driver) {
       yield { type: 'error', message: 'Command Code is unavailable in this Milo runtime.' }
@@ -1908,6 +1917,9 @@ export class Session {
       error: undefined,
     }
     if (!existingPending) await this.persist()
+    if (redactedInput.redacted) {
+      yield { type: 'text-delta', delta: `⚠ ${SECRET_REDACTED_NOTICE}\n\n` }
+    }
     let attempted = false
     const traceStarted = Date.now()
     let traceError: string | undefined = 'Command Code turn was interrupted.'

@@ -28,7 +28,7 @@ export interface AnthropicProviderOptions {
 }
 
 interface Block {
-  kind: 'text' | 'tool'
+  kind: 'thinking' | 'text' | 'tool'
   id?: string
   name?: string
   json: string
@@ -173,6 +173,7 @@ export class AnthropicProvider implements Provider {
     // and reporting its last words as a finished answer is the silent half of a
     // dropped connection.
     let finished = false
+    let inThinking = false
     let contentChars = 0
     let reasoningChars = 0
     let inputTokens = 0
@@ -201,19 +202,39 @@ export class AnthropicProvider implements Provider {
         }
         case 'content_block_start': {
           const block = event.content_block
-          if (block?.type === 'tool_use') {
-            blocks.set(event.index, { kind: 'tool', id: block.id, name: block.name, json: '' })
+          if (block?.type === 'thinking' || block?.type === 'redacted_thinking') {
+            blocks.set(event.index, { kind: 'thinking', json: '' })
+            if (!inThinking) {
+              inThinking = true
+              yield { type: 'reasoning-start' }
+            }
           } else {
-            blocks.set(event.index, { kind: 'text', json: '' })
+            if (inThinking) {
+              inThinking = false
+              yield { type: 'reasoning-end' }
+            }
+            if (block?.type === 'tool_use') {
+              blocks.set(event.index, { kind: 'tool', id: block.id, name: block.name, json: '' })
+            } else {
+              blocks.set(event.index, { kind: 'text', json: '' })
+            }
           }
           break
         }
         case 'content_block_delta': {
           const delta = event.delta
           if (delta?.type === 'text_delta' && delta.text) {
+            if (inThinking) {
+              inThinking = false
+              yield { type: 'reasoning-end' }
+            }
             contentChars += delta.text.length
             yield { type: 'text', delta: delta.text }
           } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+            if (!inThinking) {
+              inThinking = true
+              yield { type: 'reasoning-start' }
+            }
             reasoningChars += delta.thinking.length
             yield { type: 'reasoning', delta: delta.thinking }
           } else if (delta?.type === 'signature_delta' && delta.signature) {
@@ -221,6 +242,10 @@ export class AnthropicProvider implements Provider {
             // the block replayable on the next request.
             yield { type: 'reasoning-signature', signature: delta.signature }
           } else if (delta?.type === 'input_json_delta') {
+            if (inThinking) {
+              inThinking = false
+              yield { type: 'reasoning-end' }
+            }
             const block = blocks.get(event.index)
             if (block) block.json += delta.partial_json ?? ''
           }
@@ -228,7 +253,12 @@ export class AnthropicProvider implements Provider {
         }
         case 'content_block_stop': {
           const block = blocks.get(event.index)
-          if (block?.kind === 'tool') {
+          if (block?.kind === 'thinking') {
+            if (inThinking) {
+              inThinking = false
+              yield { type: 'reasoning-end' }
+            }
+          } else if (block?.kind === 'tool') {
             yield {
               type: 'tool-call',
               id: block.id ?? `call_${event.index}`,
@@ -239,6 +269,10 @@ export class AnthropicProvider implements Provider {
           break
         }
         case 'message_delta': {
+          if (inThinking) {
+            inThinking = false
+            yield { type: 'reasoning-end' }
+          }
           const stop = event.delta?.stop_reason
           if (stop) {
             finish = mapStopReason(stop)
@@ -251,6 +285,10 @@ export class AnthropicProvider implements Provider {
           break
         }
         case 'message_stop': {
+          if (inThinking) {
+            inThinking = false
+            yield { type: 'reasoning-end' }
+          }
           finished = true
           break
         }
@@ -264,6 +302,10 @@ export class AnthropicProvider implements Provider {
 
     if (!finished) {
       throw new Error('the provider stream ended before the message was complete')
+    }
+
+    if (inThinking) {
+      yield { type: 'reasoning-end' }
     }
 
     // A provider that puts both channels in one field is indistinguishable from a

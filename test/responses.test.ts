@@ -168,4 +168,50 @@ describe('ResponsesProvider', () => {
 
     await expect(collect(provider)).rejects.toThrow('ended before the message was complete')
   })
+
+  it('signals reasoning-start and reasoning-end for streamed reasoning items, without faking starts on completed fallback', async () => {
+    stubFetch([
+      frame({ type: 'response.output_item.added', item: { type: 'reasoning', id: 'rs_1' } }),
+      frame({ type: 'response.reasoning_summary_text.delta', delta: 'checking' }),
+      frame({ type: 'response.output_item.done', item: { type: 'reasoning', id: 'rs_1' } }),
+      frame({ type: 'response.output_text.delta', delta: 'answer' }),
+      frame({ type: 'response.completed', response: { status: 'completed', output: [] } }),
+    ])
+    const provider = new ResponsesProvider({ id: 'chatgpt', baseURL: 'https://example.test', apiKey: 'k' })
+    const streamed = await collect(provider)
+    expect(streamed).toEqual([
+      { type: 'reasoning-start' },
+      { type: 'reasoning', delta: 'checking' },
+      { type: 'reasoning-end' },
+      { type: 'text', delta: 'answer' },
+      { type: 'done', finishReason: 'stop' },
+    ])
+
+    stubFetch([
+      frame({
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            { type: 'reasoning', encrypted_content: 'enc_1', summary: [{ type: 'summary_text', text: 'post-hoc summary' }] },
+            { type: 'message', content: [{ type: 'output_text', text: 'final' }] },
+          ],
+        },
+      }),
+    ])
+    const fallback = await collect(provider)
+    expect(fallback.some((e) => e.type === 'reasoning-start' || e.type === 'reasoning-end')).toBe(false)
+    expect(fallback).toEqual([
+      {
+        type: 'reasoning-signature',
+        signature: JSON.stringify({
+          encrypted_content: 'enc_1',
+          summary: [{ type: 'summary_text', text: 'post-hoc summary' }],
+        }),
+      },
+      { type: 'reasoning', delta: 'post-hoc summary', replayed: true },
+      { type: 'text', delta: 'final' },
+      { type: 'done', finishReason: 'stop' },
+    ])
+  })
 })

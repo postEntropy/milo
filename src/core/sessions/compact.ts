@@ -647,7 +647,9 @@ function renderTranscript(messages: Message[]): string {
     if (text) {
       const speaker = message.internal === 'verification'
         ? 'Verification'
-        : message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : message.role
+        : message.internal === 'job'
+          ? 'Background job'
+          : message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : message.role
       lines.push(`${speaker}: ${text}`)
     }
     for (const part of message.content) {

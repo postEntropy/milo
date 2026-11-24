@@ -72,6 +72,10 @@ export function statusText(event: AgentEvent): string | undefined {
       return `Session updated by another surface (${describeRebase(event)}).`
     case 'steer':
       return 'Correction received by Milo.'
+    case 'job-waiting':
+      return event.ids.length === 1
+        ? `Waiting for ${event.ids[0]}…`
+        : `Waiting for ${event.ids.length} background jobs…`
     case 'aborted':
       return 'Stopped · the partial reply was kept.'
     case 'done':

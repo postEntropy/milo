@@ -15,7 +15,7 @@ process.env.MILO_HOME = home
 const { JobManager, announceJob, attachJobNotifier, jobPrompt } = await import('../src/core/jobs/index.js')
 const { SILENT } = await import('../src/core/silent.js')
 const { buildSystemPrompt } = await import('../src/core/agent/system.js')
-const { createJobStatusTool, createJobKillTool } = await import('../src/core/tools/jobs.js')
+const { createJobStatusTool, createJobWaitTool, createJobKillTool } = await import('../src/core/tools/jobs.js')
 const { shellTool } = await import('../src/core/tools/shell.js')
 const { jobDir, jobMetaFile, jobsDir } = await import('../src/core/config/paths.js')
 
@@ -305,6 +305,206 @@ describe('a job belongs to the session that started it', () => {
     // The session that made it still sees it.
     const mine = { ...ctx(jobs), sessionId: 'sess-a' }
     expect((await createJobStatusTool(jobs).execute({ id: started.job.id }, mine)).content).toContain('running')
+    await jobs.close()
+  })
+})
+
+describe('job_wait and turn-scoped job coordination', () => {
+  it('waits for a running job to finish and marks it consumed', async () => {
+    const jobs = new JobManager()
+    const started = jobs.start({
+      command: 'sleep 0.05 && echo tool-ready',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-wait',
+      turnId: 'turn-1',
+    })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+
+    const waitTool = createJobWaitTool(jobs)
+    const result = await waitTool.execute(
+      { id: started.job.id },
+      { ...ctx(jobs), sessionId: 'sess-wait', turnId: 'turn-1' },
+    )
+
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toContain('done')
+    expect(result.content).toContain('tool-ready')
+    expect(jobs.isConsumed(started.job.id)).toBe(true)
+    await jobs.close()
+  })
+
+  it('returns immediately when a job settled before job_wait was called', async () => {
+    const jobs = new JobManager()
+    const done = settle(jobs)
+    const started = jobs.start({
+      command: 'echo early-done',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-early',
+      turnId: 'turn-early',
+    })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+    await done
+
+    const waitTool = createJobWaitTool(jobs)
+    const result = await waitTool.execute(
+      { id: started.job.id },
+      { ...ctx(jobs), sessionId: 'sess-early', turnId: 'turn-early' },
+    )
+    expect(result.content).toContain('done')
+    expect(result.content).toContain('early-done')
+    expect(jobs.isConsumed(started.job.id)).toBe(true)
+    await jobs.close()
+  })
+
+  it('wakes job_wait early when user steering arrives', async () => {
+    const jobs = new JobManager()
+    const started = jobs.start({
+      command: 'sleep 10',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-steer',
+      turnId: 'turn-steer',
+    })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+
+    let steered = false
+    setTimeout(() => {
+      steered = true
+    }, 30)
+
+    const waitTool = createJobWaitTool(jobs)
+    const result = await waitTool.execute(
+      { id: started.job.id },
+      {
+        ...ctx(jobs),
+        sessionId: 'sess-steer',
+        turnId: 'turn-steer',
+        hasSteering: () => steered,
+      },
+    )
+
+    expect(result.content).toContain('Wait interrupted by a new message from the user')
+    expect(jobs.get(started.job.id)?.state).toBe('running')
+    expect(jobs.isConsumed(started.job.id)).toBe(false)
+    await jobs.close()
+  })
+
+  it('aborts job_wait with AbortError when the turn is cancelled', async () => {
+    const jobs = new JobManager()
+    const started = jobs.start({
+      command: 'sleep 10',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-abort',
+      turnId: 'turn-abort',
+    })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 30)
+
+    const waitTool = createJobWaitTool(jobs)
+    await expect(
+      waitTool.execute(
+        { id: started.job.id },
+        { ...ctx(jobs), signal: controller.signal, sessionId: 'sess-abort', turnId: 'turn-abort' },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    await jobs.close()
+  })
+
+  it('defers onSettled while a turn is active, suppresses consumed jobs, and kills only non-detached jobs on abort', async () => {
+    const jobs = new JobManager()
+    const announced: string[] = []
+    jobs.onSettled((job) => announced.push(job.id))
+
+    jobs.beginTurn('turn-a', 'sess-1')
+    const attached = jobs.start({
+      command: 'echo fast',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-1',
+      turnId: 'turn-a',
+      detached: false,
+    })
+    const detached = jobs.start({
+      command: 'sleep 10',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-1',
+      turnId: 'turn-a',
+      detached: true,
+    })
+    const abortTarget = jobs.start({
+      command: 'sleep 10',
+      cwd: process.cwd(),
+      origin,
+      sessionId: 'sess-1',
+      turnId: 'turn-a',
+      detached: false,
+    })
+    expect(attached.ok && detached.ok && abortTarget.ok).toBe(true)
+    if (!attached.ok || !detached.ok || !abortTarget.ok) return
+
+    // Wait for `attached` to settle while turn-a is still active.
+    for (let i = 0; i < 100 && jobs.get(attached.job.id)?.state === 'running'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(jobs.get(attached.job.id)?.state).toBe('done')
+    // Must not announce while the turn is active.
+    expect(announced).toEqual([])
+
+    // Mark `attached` as consumed in-turn, then abort the turn.
+    jobs.consume(attached.job.id)
+    jobs.endTurn('turn-a', { aborted: true })
+
+    // Neither the consumed job nor the non-detached job killed on abort is announced.
+    expect(announced).toEqual([])
+    // The non-detached running job is stopped; the independent detached job stays running.
+    for (let i = 0; i < 100 && jobs.get(abortTarget.job.id)?.state === 'running'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(jobs.get(abortTarget.job.id)?.state).toBe('killed')
+    expect(jobs.get(detached.job.id)?.state).toBe('running')
+
+    await jobs.close()
+  })
+
+  it('marks shell_command background jobs detached only when detach=true, keeping notify=never turn-attached', async () => {
+    const jobs = new JobManager()
+    const attachedRes = await shellTool.execute(
+      { command: 'sleep 10', background: true },
+      { ...ctx(jobs), sessionId: 's1', turnId: 't1' },
+    )
+    const quietAttachedRes = await shellTool.execute(
+      { command: 'sleep 10', background: true, notify: 'never' },
+      { ...ctx(jobs), sessionId: 's1', turnId: 't1' },
+    )
+    const detachedRes = await shellTool.execute(
+      { command: 'sleep 10', background: true, detach: true },
+      { ...ctx(jobs), sessionId: 's1', turnId: 't1' },
+    )
+    const silentDetachedRes = await shellTool.execute(
+      { command: 'sleep 10', background: true, detach: true, notify: 'never' },
+      { ...ctx(jobs), sessionId: 's1', turnId: 't1' },
+    )
+    expect(attachedRes.content).toContain('job_wait')
+    expect(quietAttachedRes.content).toContain('job_wait')
+    expect(detachedRes.content).toContain('independent background job')
+    expect(silentDetachedRes.content).toContain('independent background job')
+
+    const all = jobs.list('s1')
+    expect(all.filter((j) => j.detached === undefined)).toHaveLength(2)
+    expect(all.filter((j) => j.detached === true)).toHaveLength(2)
+    expect(all.filter((j) => j.notify === 'never')).toHaveLength(2)
+    expect(all.some((j) => j.detached === undefined && j.notify === 'never')).toBe(true)
+    expect(all.some((j) => j.detached === true && j.notify === 'never')).toBe(true)
     await jobs.close()
   })
 })

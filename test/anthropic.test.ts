@@ -269,4 +269,45 @@ describe('AnthropicProvider', () => {
     expect(sent[2]?.max_tokens).toBe(2048)
     expect(sent).toHaveLength(3)
   })
+
+  it('emits reasoning-start and reasoning-end for thinking and redacted_thinking blocks, and never for plain text', async () => {
+    stubFetch([
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+      frame({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'step 1' } }),
+      frame({ type: 'content_block_stop', index: 0 }),
+      frame({ type: 'content_block_start', index: 1, content_block: { type: 'redacted_thinking', data: 'enc' } }),
+      frame({ type: 'content_block_stop', index: 1 }),
+      frame({ type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } }),
+      frame({ type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: 'answer' } }),
+      frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+    ])
+
+    const events = await collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1', apiKey: 'k' }))
+    expect(events).toEqual([
+      { type: 'reasoning-start' },
+      { type: 'reasoning', delta: 'step 1' },
+      { type: 'reasoning-end' },
+      { type: 'reasoning-start' },
+      { type: 'reasoning-end' },
+      { type: 'text', delta: 'answer' },
+      { type: 'done', finishReason: 'stop' },
+    ])
+
+    stubFetch([
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+      frame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'direct' } }),
+      frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+    ])
+    const plainEvents = await collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1', apiKey: 'k' }))
+    expect(plainEvents.some((e) => e.type === 'reasoning-start' || e.type === 'reasoning-end')).toBe(false)
+
+    stubFetch([
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+      frame({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'cut off' } }),
+      frame({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'answer' } }),
+      frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+    ])
+    const forcedClose = await collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1', apiKey: 'k' }))
+    expect(forcedClose).toContainEqual({ type: 'reasoning-end' })
+  })
 })

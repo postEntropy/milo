@@ -77,7 +77,7 @@ export function attachJobNotifier(runtime: AgentRuntime, deliver: JobDeliver): (
   const jobs = runtime.jobs
   if (!jobs) return () => undefined
   return jobs.onSettled((job) => {
-    if (!shouldAnnounce(job)) return
+    if (jobs.isConsumed(job.id) || !shouldAnnounce(job)) return
     void announce(runtime, job, deliver)
   })
 }

@@ -26,6 +26,17 @@ export interface JobStartInput {
    * session behind it — the terminal's own bootstrap, a bare test.
    */
   sessionId?: string
+  /**
+   * The turn that started this job. Non-detached jobs belong to that turn until it
+   * finishes or consumes their result, so the turn continues automatically instead
+   * of ending while the command is still running or after an early completion race.
+   */
+  turnId?: string
+  /**
+   * Whether this job was intentionally detached to run independently after the
+   * turn ends (e.g. a server or user-requested background download).
+   */
+  detached?: boolean
   notify?: JobNotify
 }
 
@@ -38,6 +49,10 @@ export interface JobMeta {
   origin: MemoryScope
   /** The session that started it; see `JobStartInput`. Absent on an older record. */
   sessionId?: string
+  /** The turn that started it; see `JobStartInput`. Absent on an older record. */
+  turnId?: string
+  /** Whether the job was started as independent/detached from the turn. */
+  detached?: boolean
   state: JobState
   startedAt: number
   endedAt?: number

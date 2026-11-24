@@ -137,7 +137,7 @@ export interface Message {
   role: Role
   content: ContentPart[]
   /** Internal instruction supplied by Milo; sent to the model but hidden in transcripts. */
-  internal?: 'verification'
+  internal?: 'verification' | 'job'
   /** The person's own text, without extracted attachment contents. */
   displayText?: string
   /** Media preparation notices shown with this turn. */
@@ -247,7 +247,9 @@ export interface ChatRequest {
 
 export type StreamEvent =
   | { type: 'text'; delta: string }
-  | { type: 'reasoning'; delta: string }
+  | { type: 'reasoning-start' }
+  | { type: 'reasoning'; delta: string; replayed?: boolean }
+  | { type: 'reasoning-end'; durationMs?: number }
   | { type: 'reasoning-signature'; signature: string }
   | { type: 'tool-call'; id: string; name: string; args: unknown }
   | { type: 'usage'; inputTokens: number; outputTokens: number; cachedInputTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
