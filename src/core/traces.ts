@@ -2,11 +2,13 @@ import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { errorMessage } from '../util/errors.js'
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, tightenPrivateFile } from '../util/fs.js'
 import { logWarn } from '../util/log.js'
 import { tracesFile } from './config/paths.js'
 import { sanitizeToolArgsForPersistence } from './computer/sanitize.js'
 import { isComputerToolName } from './computer/tools.js'
 import type { ChatRequest, FinishReason, Provider, StreamEvent } from './providers/types.js'
+import { redactSecrets, redactSecretsInValue } from './secrets.js'
 import { currentTraceContext } from './trace-context.js'
 
 /** The kinds of execution the log records. A closed vocabulary, so a reader can trust the name. */
@@ -30,9 +32,6 @@ export interface TraceWriter {
   record(entry: TraceEvent): void
 }
 
-const FILE_MODE = 0o600
-const DIR_MODE = 0o700
-
 /**
  * The execution log, one append-only JSONL file under `~/.milo`.
  *
@@ -45,9 +44,10 @@ export const fileTraces: TraceWriter = {
   record(entry: TraceEvent): void {
     try {
       const file = tracesFile()
-      mkdirSync(path.dirname(file), { recursive: true, mode: DIR_MODE })
+      mkdirSync(path.dirname(file), { recursive: true, mode: PRIVATE_DIR_MODE })
       const recorded = typeof entry.id === 'string' ? entry : { ...entry, id: randomUUID() }
-      appendFileSync(file, `${JSON.stringify(recorded)}\n`, { mode: FILE_MODE })
+      appendFileSync(file, `${JSON.stringify(recorded)}\n`, { mode: PRIVATE_FILE_MODE })
+      tightenPrivateFile(file)
     } catch (error) {
       logWarn(`could not write the execution log: ${errorMessage(error)}`)
     }
@@ -102,13 +102,19 @@ export class TracedProvider implements Provider {
       for await (const event of this.inner.stream(req)) {
         const last = output.at(-1)
         if (event.type === 'text' && last?.type === 'text') last.delta += event.delta
-        else if (event.type === 'reasoning' && last?.type === 'reasoning') last.delta += event.delta
+        else if (event.type === 'reasoning' && last?.type === 'reasoning' && Boolean(event.replayed) === Boolean(last.replayed)) last.delta += event.delta
         else if (event.type === 'tool-call' && isComputerToolName(event.name)) {
           output.push({ ...event, args: sanitizeToolArgsForPersistence(event.name, event.args) })
         } else output.push({ ...event })
         // The first token is the number that matters: it is the wait the person
         // feels, apart from the rest, which is the model producing the answer.
-        if (firstTokenAt === undefined && (event.type === 'text' || event.type === 'reasoning' || event.type === 'tool-call')) {
+        if (
+          firstTokenAt === undefined &&
+          (event.type === 'text' ||
+            (event.type === 'reasoning' && !event.replayed) ||
+            event.type === 'reasoning-start' ||
+            event.type === 'tool-call')
+        ) {
           firstTokenAt = Date.now()
         }
         if (event.type === 'usage') {
@@ -145,7 +151,7 @@ export class TracedProvider implements Provider {
         ...(tag?.turn ?? context?.turn ? { turn: tag?.turn ?? context?.turn } : {}),
         ...(context?.callId ? { callId: context.callId } : {}),
         input,
-        output,
+        output: sanitizeOutputForTrace(output),
         ...(attachments.length ? { attachments } : {}),
         ...(firstTokenAt !== undefined ? { ttftMs: firstTokenAt - started } : {}),
         ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
@@ -159,30 +165,60 @@ export class TracedProvider implements Provider {
   }
 }
 
-/** Strip ephemeral desktop screenshots and raw accessibility trees before writing a trace line. */
+/** Strip ephemeral desktop screenshots, raw accessibility trees, and secrets before writing a trace line. */
 function sanitizeRequestForTrace(request: Omit<ChatRequest, 'signal' | 'trace'>): unknown {
   const cloned = JSON.parse(JSON.stringify(request)) as Omit<ChatRequest, 'signal' | 'trace'>
+  if (typeof cloned.system === 'string') {
+    cloned.system = redactSecrets(cloned.system).text
+  }
   if (Array.isArray(cloned.messages)) {
     for (const message of cloned.messages) {
+      if (typeof message.displayText === 'string') {
+        message.displayText = redactSecrets(message.displayText).text
+      }
       if (!Array.isArray(message.content)) continue
       for (const part of message.content) {
-        if (part.type === 'tool-call' && isComputerToolName(part.name)) {
-          part.args = sanitizeToolArgsForPersistence(part.name, part.args)
+        if (part.type === 'text' || part.type === 'reasoning') {
+          part.text = redactSecrets(part.text).text
+          continue
+        }
+        if (part.type === 'tool-call') {
+          const args = isComputerToolName(part.name)
+            ? sanitizeToolArgsForPersistence(part.name, part.args)
+            : part.args
+          part.args = redactSecretsInValue(args)
           continue
         }
         if (part.type !== 'tool-result') continue
         if (typeof part.persistedContent === 'string') {
-          part.content = part.persistedContent
+          part.content = redactSecrets(part.persistedContent).text
           delete part.persistedContent
           delete part.images
-        } else if (Array.isArray(part.images)) {
-          part.images = part.images.filter((image) => !image.inlineData && Boolean(image.path))
-          if (part.images.length === 0) delete part.images
+        } else {
+          if (typeof part.content === 'string') {
+            part.content = redactSecrets(part.content).text
+          }
+          if (Array.isArray(part.images)) {
+            part.images = part.images.filter((image) => !image.inlineData && Boolean(image.path))
+            if (part.images.length === 0) delete part.images
+          }
         }
       }
     }
   }
   return cloned
+}
+
+function sanitizeOutputForTrace(output: StreamEvent[]): StreamEvent[] {
+  return output.map((event) => {
+    if (event.type === 'text' || event.type === 'reasoning') {
+      return { ...event, delta: redactSecrets(event.delta).text }
+    }
+    if (event.type === 'tool-call') {
+      return { ...event, args: redactSecretsInValue(event.args) }
+    }
+    return event
+  })
 }
 
 /** Keep the bytes that a request refers to even if its original files are later removed. */
@@ -266,7 +302,8 @@ export function trimTraces(before: string, file: string = tracesFile()): number 
   const removed = events.length - kept.length
   if (removed === 0) return 0
   const text = kept.map((event) => `${JSON.stringify(event)}\n`).join('')
-  writeFileSync(file, text, { mode: FILE_MODE })
+  writeFileSync(file, text, { mode: PRIVATE_FILE_MODE })
+  tightenPrivateFile(file)
   return removed
 }
 

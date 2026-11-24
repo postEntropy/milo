@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { prepareIncoming, type IncomingFile, type PreparedMedia } from '../core/media.js'
+import { redactSecrets } from '../core/secrets.js'
 import type { Session } from '../core/session.js'
 
 /** The same preparation and model choice for every surface that sends a turn. */
@@ -8,7 +9,7 @@ export async function prepareTurnMedia(session: Session, text: string, files: In
     model: session.model,
     modelProfile: (model) => session.modelProfile(model),
     supportsNativePdf: (model) => session.supportsNativePdf(model),
-    question: text,
+    question: redactSecrets(text).text,
     signal,
     analyzeImages: (model, images, question) => session.analyzeImages(model, images, question, signal),
   })

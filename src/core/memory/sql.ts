@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { statSync } from 'node:fs'
 import process from 'node:process'
-import { PRIVATE_FILE_MODE } from '../../util/fs.js'
+import { tightenPrivateFile } from '../../util/fs.js'
 import { tokenize } from './tokenize.js'
 
 type SqliteModule = typeof import('node:sqlite')
@@ -82,7 +82,6 @@ export function sizeOnDisk(location: string): number {
  */
 export function tightenDb(location: string): void {
   for (const suffix of ['', '-wal', '-shm']) {
-    const file = `${location}${suffix}`
-    if (existsSync(file)) chmodSync(file, PRIVATE_FILE_MODE)
+    tightenPrivateFile(`${location}${suffix}`)
   }
 }

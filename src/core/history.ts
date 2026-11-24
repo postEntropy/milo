@@ -1,8 +1,10 @@
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { errorMessage } from '../util/errors.js'
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, tightenPrivateFile } from '../util/fs.js'
 import { logWarn } from '../util/log.js'
 import { historyDir } from './config/paths.js'
+import { redactSecrets, redactSecretsInValue } from './secrets.js'
 
 /**
  * One line of the log. Everything a reader needs, so a search never has to join
@@ -24,11 +26,26 @@ export interface HistoryWriter {
   append(entries: HistoryEntry[]): void
 }
 
-const FILE_MODE = 0o600
-const DIR_MODE = 0o700
 const FILE_NAME = /^\d{4}-\d{2}-\d{2}\.jsonl$/
 const DEFAULT_DAYS = 30
 const DEFAULT_LIMIT = 20
+
+function sanitizeHistoryEntry(entry: HistoryEntry): HistoryEntry {
+  return {
+    ...entry,
+    ...(entry.text !== undefined ? { text: redactSecrets(entry.text).text } : {}),
+    ...(entry.reasoning !== undefined ? { reasoning: redactSecrets(entry.reasoning).text } : {}),
+    ...(entry.tool
+      ? {
+          tool: {
+            ...entry.tool,
+            args: redactSecretsInValue(entry.tool.args),
+            ...(entry.tool.result !== undefined ? { result: redactSecrets(entry.tool.result).text } : {}),
+          },
+        }
+      : {}),
+  }
+}
 
 /**
  * The long-term record: one JSONL file per day under `~/.milo/history`. Sessions
@@ -40,11 +57,12 @@ export const fileHistory: HistoryWriter = {
     if (entries.length === 0) return
     try {
       const dir = historyDir()
-      mkdirSync(dir, { recursive: true, mode: DIR_MODE })
+      mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE })
       const file = path.join(dir, `${dayOf(new Date())}.jsonl`)
-      appendFileSync(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''), {
-        mode: FILE_MODE,
+      appendFileSync(file, entries.map((entry) => `${JSON.stringify(sanitizeHistoryEntry(entry))}\n`).join(''), {
+        mode: PRIVATE_FILE_MODE,
       })
+      tightenPrivateFile(file)
     } catch (error) {
       // A log that cannot be written must never take a turn down with it.
       logWarn(`could not write the history: ${errorMessage(error)}`)

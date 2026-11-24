@@ -6,6 +6,7 @@ import { errorMessage } from '../../util/errors.js'
 import { ensurePrivateDir } from '../../util/fs.js'
 import { logWarn } from '../../util/log.js'
 import { dayOf, type HistoryEntry } from '../history.js'
+import { redactSecrets } from '../secrets.js'
 import { hashOf, loadSqlite, tightenDb, toMatchQuery } from './sql.js'
 import type { MemoryItem, MemoryScope, TurnSource } from './types.js'
 
@@ -183,7 +184,7 @@ export class TurnIndex implements TurnSource {
       const rows = this.selectStmt.all(match, limit) as unknown as TurnRow[]
       return rows.map((row, index) => ({
         id: row.uid,
-        text: row.text,
+        text: redactSecrets(row.text).text,
         createdAt: Date.parse(row.at) || 0,
         tags: ['user'],
         score: 1 / (1 + index),
@@ -290,8 +291,9 @@ export class TurnIndex implements TurnSource {
         continue
       }
       if (entry.kind !== 'user') continue
-      const text = entry.text?.trim()
-      if (!text) continue
+      const rawText = entry.text?.trim()
+      if (!rawText) continue
+      const text = redactSecrets(rawText).text
       rows.push({
         at: entry.at ?? '',
         session: entry.session ?? '',

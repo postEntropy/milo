@@ -10,6 +10,7 @@ import { logWarn } from '../../util/log.js'
 import { errorMessage } from '../../util/errors.js'
 import type { TraceWriter } from '../traces.js'
 import { currentTraceContext } from '../trace-context.js'
+import { redactSecrets } from '../secrets.js'
 import { createOllama, createOpenAiEmbeddings, type Embedder } from './embed.js'
 import { sharesWords } from './coverage.js'
 import { SqliteMemory, sqliteMemoryFile, sqliteMemoryStatus } from './sqlite.js'
@@ -44,11 +45,21 @@ export function createMemory(
   dir: string,
   options: { apiKey?: string; traces?: TraceWriter } = {},
 ): Memory {
-  const embedder = embedderFor(config.embedding, options.apiKey)
+  const rawEmbedder = embedderFor(config.embedding, options.apiKey)
+  const embedder = rawEmbedder ? sanitizedEmbedder(rawEmbedder) : undefined
   return new SqliteMemory({
     dir,
     embedder: embedder && options.traces ? tracedEmbedder(embedder, config.embedding?.provider ?? 'unknown', options.traces) : embedder,
   })
+}
+
+function sanitizedEmbedder(embedder: Embedder): Embedder {
+  return {
+    model: embedder.model,
+    embed(texts) {
+      return embedder.embed(texts.map((text) => redactSecrets(text).text))
+    },
+  }
 }
 
 function tracedEmbedder(embedder: Embedder, provider: string, traces: TraceWriter): Embedder {
@@ -56,14 +67,15 @@ function tracedEmbedder(embedder: Embedder, provider: string, traces: TraceWrite
     model: embedder.model,
     async embed(texts) {
       if (!texts.length) return embedder.embed(texts)
+      const cleanTexts = texts.map((text) => redactSecrets(text).text)
       const started = Date.now()
       const context = currentTraceContext()
       try {
-        const output = await embedder.embed(texts)
-        traces.record({ at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'embedding.request', ok: true, ms: Date.now() - started, model: embedder.model, provider, purpose: 'memory', input: [...texts], output: output.map((vector) => Array.from(vector)), ...context })
+        const output = await embedder.embed(cleanTexts)
+        traces.record({ at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'embedding.request', ok: true, ms: Date.now() - started, model: embedder.model, provider, purpose: 'memory', input: cleanTexts, output: output.map((vector) => Array.from(vector)), ...context })
         return output
       } catch (error) {
-        traces.record({ at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'embedding.request', ok: false, ms: Date.now() - started, model: embedder.model, provider, purpose: 'memory', input: [...texts], error: errorMessage(error), ...context })
+        traces.record({ at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'embedding.request', ok: false, ms: Date.now() - started, model: embedder.model, provider, purpose: 'memory', input: cleanTexts, error: errorMessage(error), ...context })
         throw error
       }
     },

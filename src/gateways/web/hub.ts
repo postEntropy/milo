@@ -38,6 +38,7 @@ import { MAX_INCOMING_TOTAL_BYTES, type IncomingFile } from '../../core/media.js
 import { saveCommandCodeAttachments } from '../../core/command-code-attachments.js'
 import { ComputerPreviewStore } from '../../core/computer/preview-store.js'
 import { listCommandCodeModels } from '../../core/command-code-models.js'
+import { redactSecrets } from '../../core/secrets.js'
 import type { ImagePart } from '../../core/providers/types.js'
 
 /**
@@ -534,7 +535,13 @@ export class WebHub {
         const steered = this.turns.steer(key, frame.text)
         if (steered) {
           const turnId = this.live.get(sessionId)?.id
-          if (turnId) this.emitTurn(sessionId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
+          if (turnId) {
+            this.emitTurn(sessionId, {
+              type: 'event',
+              turnId,
+              event: { type: 'steer', text: redactSecrets(frame.text).text },
+            })
+          }
           accept(true)
           return
         }
@@ -1222,12 +1229,13 @@ export class WebHub {
         if (turnStarted) return
         turnStarted = true
         if (!sessionId) return
+        const turnStartText = files?.length
+          ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
+          : text
         this.emitTurn(sessionId, {
           type: 'turn-start',
           id,
-          text: files?.length
-            ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
-            : text,
+          text: redactSecrets(turnStartText).text,
           ...(pendingRetry ? { retryPendingId: pendingRetry } : {}),
           ...(requestId ? { requestId } : {}),
         })

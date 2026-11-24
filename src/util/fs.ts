@@ -101,3 +101,13 @@ export function writePrivateFileSync(file: string, content: string): void {
 export function ensurePrivateDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE })
 }
+
+/** Tightens an existing file to owner-only `0600` when created under a looser mode. */
+export function tightenPrivateFile(file: string): void {
+  try {
+    const mode = statSync(file).mode & 0o7777
+    if (mode !== PRIVATE_FILE_MODE) chmodSync(file, PRIVATE_FILE_MODE)
+  } catch {
+    // Missing or un-stattable file: nothing to tighten.
+  }
+}

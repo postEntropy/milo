@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { MILO_HOME, inputHistoryFile } from '../../core/config/paths.js'
+import { redactSecrets } from '../../core/secrets.js'
 import { errorMessage } from '../../util/errors.js'
 import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { logWarn } from '../../util/log.js'
@@ -30,13 +31,31 @@ export function readInputHistory(): string[] {
 }
 
 /**
+ * Appends a sent input line after redacting any secrets, skipping consecutive
+ * duplicates and capping the list at `limit`.
+ */
+export function appendInputHistory(
+  history: readonly string[],
+  text: string,
+  limit = Number.POSITIVE_INFINITY,
+): string[] {
+  const clean = redactSecrets(text).text
+  const next = [...history]
+  // The same line twice in a row is one entry: recalling it twice is noise.
+  if (next[next.length - 1] !== clean) next.push(clean)
+  if (next.length > limit) next.splice(0, next.length - limit)
+  return next
+}
+
+/**
  * Writes the whole list down. Never rejects: a line that was sent is sent, and
  * a history that could not be written is logged and left for the next one.
  */
 export async function saveInputHistory(entries: string[]): Promise<void> {
   try {
     ensurePrivateDir(MILO_HOME)
-    await writePrivateFile(inputHistoryFile(), `${JSON.stringify(entries, null, 2)}\n`)
+    const sanitized = entries.map((entry) => redactSecrets(entry).text)
+    await writePrivateFile(inputHistoryFile(), `${JSON.stringify(sanitized, null, 2)}\n`)
   } catch (error) {
     logWarn(`could not write ${inputHistoryFile()}: ${errorMessage(error)}`)
   }
