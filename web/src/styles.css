@@ -765,9 +765,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    pixel of the border's own colour, which is what a box this large wants. */
 .composer-box { position: relative; width: min(620px, 100%); margin: 0 auto; border: .5px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
 .composer-box:focus-within { box-shadow: var(--focus-ring); }
-.composer-row { display: flex; align-items: flex-end; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.composer-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4) var(--space-3); }
 .composer-lead, .composer-trail { display: flex; flex: none; min-height: var(--control-md); align-items: center; gap: var(--space-3); }
-.composer-box textarea { display: block; flex: 1 1 auto; width: 100%; min-width: 0; min-height: var(--control-md); max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: var(--space-3) var(--space-2); font-size: var(--text-md); line-height: 1.5; }
+.composer-box textarea { display: block; width: 100%; min-width: 0; min-height: var(--control-lg); max-height: min(40vh, 360px); resize: none; border: 0; outline: 0; background: none; padding: var(--space-5) var(--space-6) var(--space-2); font-size: var(--text-md); line-height: 1.5; }
 .composer-files { display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4) var(--space-6) 0; }
 .composer-upload-error { padding: var(--space-4) var(--space-7) 0; color: var(--danger); font-size: var(--text-xs); }
 .composer-file { display: inline-flex; align-items: center; gap: var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); padding: var(--space-3) var(--space-4); color: var(--muted); font-size: var(--text-xs); }
@@ -891,7 +891,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-effort .reasoning-slider input[type='range']::-moz-range-thumb { width: var(--slider-thumb); height: var(--slider-thumb); box-shadow: 0 1px 4px rgb(0 0 0 / 24%), 0 0 0 .5px rgb(0 0 0 / 8%); }
 .composer-effort .reasoning-slider-dot { width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; }
 .composer-model-wrap .select-menu:not(.select-menu-panel) .composer-effort { margin: var(--space-2) calc(var(--space-3) * -1) calc(var(--space-3) * -1); border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
-.composer-spacer { flex: 1; }
 /* How full the model's window is, beside the send button: a thin ring that fills
    as the conversation grows, and the count, so a compaction is never a surprise. */
 .composer-context { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); color: var(--muted); font: var(--text-2xs) var(--font-body); font-variant-numeric: tabular-nums; }

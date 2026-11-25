@@ -300,7 +300,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const maxHeight = Math.min(360, Math.round(viewportHeight * 0.4))
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
   }, [draft])
 
   /** Writes the draft and remembers it, so leaving the conversation keeps it. */
@@ -610,6 +612,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <span className="composer-quote-text">{quote}</span>
           <button className="composer-quote-remove" type="button" title="Remove quote" aria-label="Remove quote" onClick={() => setQuote(null)}><Icon name="x" size={14} /></button>
         </div>}
+        <textarea
+          ref={ref}
+          aria-label="Message Milo"
+          placeholder="Ask Milo anything…"
+          rows={1}
+          value={draft}
+          onChange={(event) => { editDraft(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length) }}
+          onClick={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
+          onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
+          onKeyDown={key}
+        />
         <div className="composer-row">
           <div className="composer-lead">
             <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } setBoundedFileDraft(fileDrafts.current, draftKey, next); return next }); event.target.value = '' }} />
@@ -626,17 +639,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               <Icon name={plan ? 'list-check' : 'code'} size={15} />
             </button>}
           </div>
-          <textarea
-            ref={ref}
-            aria-label="Message Milo"
-            placeholder="Ask Milo anything…"
-            rows={1}
-            value={draft}
-            onChange={(event) => { editDraft(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length) }}
-            onClick={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
-            onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
-            onKeyDown={key}
-          />
           <div className="composer-trail">
             <div className="composer-model-wrap">
               <Select
