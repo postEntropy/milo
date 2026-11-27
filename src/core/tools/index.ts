@@ -28,10 +28,12 @@ import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
 import { memoriesTool } from './memories.js'
 import { panelTool } from './panel.js'
+import { providersTool } from './providers.js'
 import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
 import { sendFileTool } from './send-file.js'
 import { sessionsTool } from './sessions.js'
+import { settingsTool } from './settings.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
 import { createReadSkillTool } from './read-skill.js'
@@ -67,7 +69,9 @@ export { memoriesTool } from './memories.js'
 export { instructionsTool } from './instructions.js'
 export { recallTool } from './recall.js'
 export { sessionsTool } from './sessions.js'
+export { settingsTool } from './settings.js'
 export { panelTool } from './panel.js'
+export { providersTool } from './providers.js'
 export { routineTool } from './routine.js'
 export { searchHistoryTool } from './search-history.js'
 export { sendFileTool } from './send-file.js'
@@ -109,6 +113,8 @@ export const builtinTools = [
   delegatedWorkTool,
   todoTool,
   taskListsTool,
+  providersTool,
+  settingsTool,
   shellTool,
 ]
 

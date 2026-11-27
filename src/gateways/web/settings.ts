@@ -3,8 +3,10 @@ import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
   PROVIDER_WIRES,
+  applyConfigPatch,
   mutateConfig,
   removeCustomProvider,
+  sanitizeConfig,
   saveCustomProvider,
   saveSecret as coreSaveSecret,
   removeSecret as coreRemoveSecret,
@@ -36,9 +38,6 @@ import {
   readAuth,
   readConfig,
   resolveProvider,
-  saveConfig,
-  setDisplay,
-  setPermissionMode,
   setProvider as persistProvider,
   setReasoningEffort,
 } from '../../core/config/load.js'
@@ -54,12 +53,9 @@ import {
   SEARCH_PROVIDERS,
   THINKING_LEVELS,
   TOOL_LEVELS,
-  isColorPaletteId,
   type PaletteState,
 } from './protocol.js'
-import { colorPaletteNames } from '../../core/color-palettes.js'
 import {
-  ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
   type Config,
   type WireInput,
@@ -486,42 +482,12 @@ export class WebSettings {
 
   private async saveConfig(body: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
-      const current = readConfig()
-      if (!current) throw new Error('Milo is not configured.')
       const patch = body.config
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Expected a config object.')
       const patchConfig = patch as Record<string, unknown>
-      // A patch is merged section by section, not laid over the whole config: a
-      // nested object the client sent only part of keeps the keys it left out
-      // instead of resetting them to the schema's defaults on the way through.
-      // Arrays replace — a list is a whole value, not a set to be added to.
-      // A `null` clears an optional key (and nullable fields default back to `null`).
-      const isPlain = (value: unknown): value is Record<string, unknown> =>
-        Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-      if ('palette' in patchConfig) {
-        if (!isPlain(patchConfig.palette)) throw new Error('Expected a palette settings object.')
-        if ('sync' in patchConfig.palette && typeof patchConfig.palette.sync !== 'boolean') {
-          throw new Error('Palette sync must be true or false.')
-        }
-        if ('palette' in patchConfig.palette && !isColorPaletteId(patchConfig.palette.palette)) {
-          throw new Error(`Unknown colour palette "${String(patchConfig.palette.palette)}". Use one of: ${colorPaletteNames()}.`)
-        }
-      }
-      const merge = (base: unknown, patch: unknown): unknown => {
-        if (!isPlain(patch) || !isPlain(base)) return patch
-        const out: Record<string, unknown> = { ...base }
-        for (const [key, value] of Object.entries(patch)) {
-          if (value === null) {
-            delete out[key]
-            continue
-          }
-          out[key] = merge(out[key], value)
-        }
-        return out
-      }
-      const merged = merge(current, patchConfig) as Record<string, unknown>
-      const next = ConfigSchema.parse(merged)
-      saveConfig(next)
+      const applied = applyConfigPatch(patchConfig)
+      if (!applied.ok) throw new Error(applied.error)
+      const { previous: current, next } = applied.value
       this.runtime.permissions?.update({
         mode: next.permissions.mode,
         allow: next.permissions.allow,
@@ -531,9 +497,6 @@ export class WebSettings {
       this.runtime.setReasoningEffort(next.reasoningEffort)
       this.runtime.setMediaModels(next.media)
       this.runtime.setSessions(next.sessions)
-      setPermissionMode(next.permissions.mode)
-      setDisplay(next.display)
-      setReasoningEffort(next.reasoningEffort)
       // What the install saves is what the sessions after this one start on — the
       // conversation in progress keeps what it is running, so nothing is hijacked
       // mid-turn. A provider move is resolved from disk and applied live, the same
@@ -1049,19 +1012,6 @@ export class WebSettings {
     const next = this.writeTail.then(work, work)
     this.writeTail = next.catch(() => undefined)
     return next
-  }
-}
-
-function sanitizeConfig(config: Config): Config {
-  return {
-    ...config,
-    providers: Object.fromEntries(Object.entries(config.providers).map(([id, entry]) => [
-      id,
-      {
-        ...entry,
-        headers: undefined,
-      },
-    ])),
   }
 }
 

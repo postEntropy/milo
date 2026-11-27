@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import type { Config } from '../config/schema.js'
 import type { FileChange } from '../change.js'
 import type { JobManager } from '../jobs/index.js'
 import type { MemoryInput, MemoryItem, MemoryScope } from '../memory/types.js'
@@ -46,6 +47,23 @@ export interface SessionAdmin {
   current: string
   list(): Promise<SessionSummary[]>
   remove(id: string): Promise<boolean>
+}
+
+/**
+ * How a session hands the `providers` tool live switching and refresh of the
+ * active provider. Absent on unattended runs, shared chats, and bare tests.
+ */
+export interface ProviderAdmin {
+  use(id: string, model?: string): { provider: string; name: string; model: string }
+  refreshIfActive(id: string): void
+}
+
+/**
+ * How a session applies live config updates after `settings` saves `config.yml`.
+ * Absent on unattended runs, shared chats, and bare tests.
+ */
+export interface SettingsAdmin {
+  apply(previous: Config, next: Config): void
 }
 
 /**
@@ -112,6 +130,10 @@ export interface ToolContext {
    * catalog rather than offered and refused.
    */
   sessionAdmin?: SessionAdmin
+  /** Absent where a turn may not switch or refresh the install's active provider. */
+  providerAdmin?: ProviderAdmin
+  /** Absent where a turn may not read or change Milo's own settings. */
+  settingsAdmin?: SettingsAdmin
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
   crew?: CrewStore

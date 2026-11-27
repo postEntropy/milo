@@ -9,6 +9,7 @@ import {
 } from './rules.js'
 import path from 'node:path'
 import { fileChange } from '../change.js'
+import { flattenPatchPaths } from '../settings.js'
 import { patchTargets } from './apply-patch.js'
 import { isComputerToolName } from '../computer/tools.js'
 import { matchingRule, type RuleBook } from './rule-file.js'
@@ -267,6 +268,8 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
     tool === 'mail_labels' ||
     tool === 'delegated_work' ||
     tool === 'crew' ||
+    tool === 'providers' ||
+    tool === 'settings' ||
     tool === 'computer_open' ||
     tool === 'computer_act'
   ) return null
@@ -464,6 +467,32 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
       }
       const action = typeof record.action === 'string' ? record.action : 'act'
       return `Desktop action: ${action}`
+    }
+    if (tool === 'settings') {
+      const patch = record.patch && typeof record.patch === 'object' && !Array.isArray(record.patch)
+        ? (record.patch as Record<string, unknown>)
+        : null
+      if (!patch) return 'Update Milo settings'
+      const lines = flattenPatchPaths(patch).map(
+        ({ path: key, value }) => `- ${key} = ${JSON.stringify(value)}`,
+      )
+      return lines.length > 0 ? ['Update Milo settings:', ...lines].join('\n') : 'Update Milo settings'
+    }
+    if (tool === 'providers') {
+      const action = typeof record.action === 'string' ? record.action : ''
+      const id = typeof record.id === 'string' ? record.id.trim() : ''
+      if (action === 'save') {
+        const name = typeof record.name === 'string' ? record.name.trim() : id
+        const baseURL = typeof record.baseURL === 'string' ? record.baseURL.trim() : ''
+        const wire = typeof record.wire === 'string' ? record.wire : 'openai'
+        const keyless = record.keyless === true ? ', no key required' : ''
+        return `Save provider ${name}${id ? ` (${id})` : ''}: ${baseURL} [${wire}${keyless}]`
+      }
+      if (action === 'remove') return `Remove custom provider ${id}`.trim()
+      if (action === 'use') {
+        const model = typeof record.model === 'string' && record.model.trim() ? ` (${record.model.trim()})` : ''
+        return `Switch active provider to ${id}${model}`
+      }
     }
     if (tool === 'delegated_work') {
       const action = typeof record.action === 'string' ? record.action : 'create'

@@ -1,5 +1,6 @@
 import { readAuth, readConfig, saveAuth, saveConfig } from './config/load.js'
 import { PRESETS } from './config/presets.js'
+import { colorPaletteNames, isColorPaletteId } from './color-palettes.js'
 import {
   ConfigSchema,
   WireSchema,
@@ -172,6 +173,122 @@ export function removeCustomProvider(id: string): SettingsResult<{ id: string }>
   if (!authRes.ok) return authRes
 
   return { ok: true, value: { id: trimmed } }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function mergePatch(base: unknown, patch: unknown): unknown {
+  if (!isPlainObject(patch) || !isPlainObject(base)) return patch
+  const out: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete out[key]
+      continue
+    }
+    out[key] = mergePatch(out[key], value)
+  }
+  return out
+}
+
+function valueAtPath(root: unknown, dotted: string): unknown {
+  let cur = root
+  for (const part of dotted.split('.')) {
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return undefined
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur
+}
+
+export function sanitizeConfig(config: Config): Config {
+  return {
+    ...config,
+    providers: Object.fromEntries(
+      Object.entries(config.providers).map(([id, entry]) => [
+        id,
+        {
+          ...entry,
+          headers: undefined,
+        },
+      ]),
+    ),
+  }
+}
+
+export function flattenPatchPaths(
+  patch: Record<string, unknown>,
+  prefix = '',
+): Array<{ path: string; value: unknown }> {
+  const out: Array<{ path: string; value: unknown }> = []
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue
+    const path = prefix ? `${prefix}.${key}` : key
+    if (isPlainObject(value)) {
+      const nested = flattenPatchPaths(value, path)
+      if (nested.length > 0) out.push(...nested)
+      else out.push({ path, value })
+    } else {
+      out.push({ path, value })
+    }
+  }
+  return out
+}
+
+export function restartReasonsForConfigChange(previous: Config, next: Config): string[] {
+  const checks: Array<[string, unknown, unknown]> = [
+    ['Browser', previous.browser, next.browser],
+    ['Computer Use', previous.computer, next.computer],
+    ['Web host and port', previous.web, next.web],
+    ['Gateways', previous.gateways, next.gateways],
+    ['Reviewer model', previous.classifier, next.classifier],
+    ['Google tools', previous.google, next.google],
+    ['Web search', previous.search, next.search],
+    ['Traces', previous.traces, next.traces],
+    ['Background jobs', previous.jobs, next.jobs],
+    ['Verification gate', previous.verification, next.verification],
+    ['Memory embeddings', previous.memory.embedding, next.memory.embedding],
+  ]
+  return checks
+    .filter(([, prevVal, nextVal]) => JSON.stringify(prevVal) !== JSON.stringify(nextVal))
+    .map(([label]) => label)
+}
+
+export function applyConfigPatch(
+  patch: Record<string, unknown>,
+): SettingsResult<{ previous: Config; next: Config; changed: string[]; restartRequired: string[] }> {
+  const previous = readConfig()
+  if (!previous) return { ok: false, error: 'Milo is not configured.' }
+  if (!isPlainObject(patch)) return { ok: false, error: 'Expected a config object.' }
+
+  if ('palette' in patch) {
+    if (!isPlainObject(patch.palette)) {
+      return { ok: false, error: 'Expected a palette settings object.' }
+    }
+    if ('sync' in patch.palette && typeof patch.palette.sync !== 'boolean') {
+      return { ok: false, error: 'Palette sync must be true or false.' }
+    }
+    if ('palette' in patch.palette && !isColorPaletteId(patch.palette.palette)) {
+      return {
+        ok: false,
+        error: `Unknown colour palette "${String(patch.palette.palette)}". Use one of: ${colorPaletteNames()}.`,
+      }
+    }
+  }
+
+  try {
+    const merged = mergePatch(previous, patch) as Record<string, unknown>
+    const next = ConfigSchema.parse(merged)
+    saveConfig(next)
+    const leaves = flattenPatchPaths(patch)
+    const changed = leaves
+      .filter(({ path }) => JSON.stringify(valueAtPath(previous, path)) !== JSON.stringify(valueAtPath(next, path)))
+      .map(({ path }) => path)
+    const restartRequired = restartReasonsForConfigChange(previous, next)
+    return { ok: true, value: { previous, next, changed, restartRequired } }
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) }
+  }
 }
 
 /**

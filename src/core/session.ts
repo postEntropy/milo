@@ -26,7 +26,7 @@ import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile, type RoutineDelivery } from './outgoing.js'
 import { type BotAuthor, DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { ModelProfile } from './providers/profile.js'
-import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
+import type { PermissionAsker, PermissionPolicy, ProviderAdmin, RoutineStore, SendFileFn, SessionAdmin, SettingsAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
 import { approvalKey, approvalScope, DefaultPermissionPolicy, isPlanTool, withApprovals, withDelegatedGrants, withGrants, withPlan } from './tools/index.js'
 import { taskDescription } from './tools/task.js'
@@ -245,6 +245,16 @@ export interface SessionOptions {
    * people's sessions withhold it the same way the routine tool is withheld.
    */
   sessionAdmin?: { list(): Promise<SessionSummary[]>; remove(id: string): Promise<boolean> }
+  /**
+   * Live provider switching and refresh for the `providers` tool. Withheld on the
+   * same boundary as `sessionAdmin`.
+   */
+  providerAdmin?: ProviderAdmin
+  /**
+   * Live settings updates for the `settings` tool. Withheld on the same boundary
+   * as `sessionAdmin` and `providerAdmin`.
+   */
+  settingsAdmin?: SettingsAdmin
   /**
    * The chat this session's turns deliver files to, when it is not the chat they
    * are already in. Set on a routine's own run, whose target was named when it
@@ -1082,6 +1092,14 @@ export class Session {
             remove: (id) => adminSource.remove(id),
           }
         : undefined
+    const providerAdmin =
+      this.options.providerAdmin && this.scope.gateway !== ROUTINE_GATEWAY && (opts?.sessionsAllowed ?? true)
+        ? this.options.providerAdmin
+        : undefined
+    const settingsAdmin =
+      this.options.settingsAdmin && this.scope.gateway !== ROUTINE_GATEWAY && (opts?.sessionsAllowed ?? true)
+        ? this.options.settingsAdmin
+        : undefined
     // A shared chat or an unattended routine/delegated run must not expose bots
     // across sessions via the `crew` tool, while `task` still records to crew.
     const crewToolAllowed = crew !== undefined && this.scope.gateway !== ROUTINE_GATEWAY
@@ -1118,6 +1136,8 @@ export class Session {
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'read_attachment' || Boolean(this.record.attachments?.length || opts?.documents?.length || opts?.images?.some((image) => !image.derivedFromDocument)))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
+      .filter((tool) => tool.name !== 'providers' || providerAdmin !== undefined)
+      .filter((tool) => tool.name !== 'settings' || settingsAdmin !== undefined)
       .filter((tool) => tool.name !== 'crew' || crewToolAllowed)
       .filter((tool) => tool.name !== 'delegated_work' || delegatedWork !== undefined)
       .filter((tool) => !isComputerToolName(tool.name) || computerAllowed)
@@ -1367,6 +1387,8 @@ export class Session {
           availableTools: registry.specs().map((tool) => tool.name),
           routine,
           sessionAdmin,
+          providerAdmin,
+          settingsAdmin,
           sendFile,
           jobs: this.options.jobs ?? undefined,
           turnId,

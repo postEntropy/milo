@@ -42,6 +42,7 @@ import {
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
 import { findPreset } from './config/presets.js'
+import { setProvider as persistProvider } from './config/load.js'
 
 export interface RuntimeOptions {
   provider: Provider
@@ -930,6 +931,32 @@ export class AgentRuntime {
       // implementation per behaviour. `listSessions` already hides routine runs,
       // and `removeSession` takes the recap and the cache entry with the record.
       sessionAdmin: { list: () => this.listSessions(), remove: (id) => this.removeSession(id) },
+      providerAdmin: {
+        use: (id, model) => {
+          this.setProvider(id, model)
+          persistProvider(this.provider.id, this.model)
+          return { provider: this.provider.id, name: this.providerName, model: this.model }
+        },
+        refreshIfActive: (id) => {
+          if (id === this.provider.id && this.canSwitchProvider) {
+            this.setProvider(id, this.model)
+          }
+        },
+      },
+      settingsAdmin: {
+        apply: (previous, next) => {
+          this.permissions?.update({
+            mode: next.permissions.mode,
+            allow: next.permissions.allow,
+            deny: next.permissions.deny,
+            threshold: next.permissions.jevThreshold,
+          })
+          this.setReasoningEffort(next.reasoningEffort)
+          this.setMediaModels(next.media)
+          this.setSessions(next.sessions)
+          if (next.model !== previous.model) this.setModel(next.model)
+        },
+      },
       modelProfile: this.options.modelProfile,
       keepSnapshots: this.options.keepSnapshots,
       // A getter, so the prompt says what the browser is now rather than what it

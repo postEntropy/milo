@@ -37,6 +37,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   instructions: 'note',
   memories: 'database',
   routine: 'repeat',
+  providers: 'cpu',
+  settings: 'settings',
   task_lists: 'list-check',
   job_status: 'clock',
   job_wait: 'clock',

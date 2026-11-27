@@ -9,7 +9,14 @@ import { CrewStore } from '../src/core/crew.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy, type PermissionAsker, type PermissionRequest } from '../src/core/tools/permission.js'
 import { crewTool } from '../src/core/tools/crew.js'
-import { builtinTools, sessionsTool } from '../src/core/tools/index.js'
+import {
+  approvalKey,
+  builtinTools,
+  providersTool,
+  sessionsTool,
+  settingsTool,
+  summarizeToolCall,
+} from '../src/core/tools/index.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool } from '../src/core/tools/types.js'
 
@@ -94,8 +101,36 @@ describe('tool permission gating', () => {
       delegated_work: false,
       todo: false,
       task_lists: false,
+      providers: false,
+      settings: false,
       shell_command: false,
     })
+  })
+
+  it('asks before a provider is saved, removed, or switched, but not when listing or testing', () => {
+    expect(providersTool.asksWhen?.({ action: 'list' })).toBe(false)
+    expect(providersTool.asksWhen?.({ action: 'test', baseURL: 'http://127.0.0.1:8080/v1' })).toBe(false)
+    expect(
+      providersTool.asksWhen?.({ action: 'save', name: 'llama.cpp', baseURL: 'http://127.0.0.1:8080/v1' }),
+    ).toBe(true)
+    expect(providersTool.asksWhen?.({ action: 'remove', id: 'llama-cpp' })).toBe(true)
+    expect(providersTool.asksWhen?.({ action: 'use', id: 'llama-cpp' })).toBe(true)
+    expect(approvalKey('providers', { action: 'save' }, '/tmp')).toBeNull()
+  })
+
+  it('asks before settings are changed, never caches approval, and summarizes patch keys', () => {
+    expect(settingsTool.asksWhen?.({ action: 'get' })).toBe(false)
+    expect(settingsTool.asksWhen?.({ action: 'set', patch: { display: { thinking: 'collapsed' } } })).toBe(true)
+    expect(approvalKey('settings', { action: 'set', patch: { display: { thinking: 'collapsed' } } }, '/tmp')).toBeNull()
+    expect(
+      summarizeToolCall(
+        {
+          action: 'set',
+          patch: { display: { thinking: 'collapsed' }, browser: { enabled: true } },
+        },
+        'settings',
+      ),
+    ).toBe('Update Milo settings:\n- display.thinking = "collapsed"\n- browser.enabled = true')
   })
 
   it('marks the delegating tool, which speaks for the subagent rather than itself', () => {
