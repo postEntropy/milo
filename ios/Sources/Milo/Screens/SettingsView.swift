@@ -153,10 +153,21 @@ struct SettingsView: View {
 
 // MARK: - Provider & model
 
+private struct CustomProviderDraft: Identifiable {
+    let id = UUID()
+    let editingId: String?
+    var name: String
+    var baseURL: String
+    var wire: String
+    var keyless: Bool
+    var apiKey = ""
+}
+
 private struct ProviderSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var picker = false
     @State private var copiedCode = false
+    @State private var customDraft: CustomProviderDraft?
 
     var body: some View {
         List {
@@ -173,6 +184,57 @@ private struct ProviderSettingsView: View {
                 ReasoningSlider(efforts: model.efforts, value: model.effort) { level in
                     Task { await model.setEffort(level) }
                 }
+            }
+            Section {
+                ForEach(model.customProviders, id: \.id) { item in
+                    Button {
+                        customDraft = CustomProviderDraft(
+                            editingId: item.id,
+                            name: item.config.name ?? item.id,
+                            baseURL: item.config.baseURL ?? "",
+                            wire: item.config.wire ?? "openai",
+                            keyless: item.config.keyless ?? false
+                        )
+                    } label: {
+                        HStack(spacing: 12) {
+                            ProviderMark(id: item.id, size: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.config.name ?? item.id)
+                                    .foregroundStyle(MiloTheme.foreground)
+                                Text(customSummary(id: item.id, config: item.config))
+                                    .font(MiloTheme.Text.small)
+                                    .foregroundStyle(MiloTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if item.id == model.providerId {
+                                Text("Active")
+                                    .font(MiloTheme.Text.small)
+                                    .foregroundStyle(MiloTheme.muted)
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if item.id != model.providerId {
+                            Button("Remove", role: .destructive) {
+                                Task { _ = await model.removeCustomProvider(id: item.id) }
+                            }
+                        }
+                    }
+                }
+                Button("Add custom provider") {
+                    customDraft = CustomProviderDraft(
+                        editingId: nil,
+                        name: "",
+                        baseURL: "",
+                        wire: "openai",
+                        keyless: false
+                    )
+                }
+            } header: {
+                Text("Custom providers")
+            } footer: {
+                Text("Connect any OpenAI-compatible, Anthropic, or local endpoint with its own API key.")
             }
             Section {
                 if model.chatGpt?.signedIn == true {
@@ -253,6 +315,132 @@ private struct ProviderSettingsView: View {
         .navigationTitle("Provider & model")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $picker) { ModelPickerSheet() }
+        .sheet(item: $customDraft) { draft in
+            CustomProviderSheet(draft: draft)
+        }
+    }
+
+    private func customSummary(id: String, config: SettingsOverview.ProviderConfig) -> String {
+        let base = config.baseURL ?? ""
+        let keyText: String
+        if config.keyless == true {
+            keyText = "No key required"
+        } else if model.auth?.providers[id]?.set == true {
+            keyText = "Key set"
+        } else {
+            keyText = "No key"
+        }
+        return base.isEmpty ? keyText : "\(base) · \(keyText)"
+    }
+}
+
+private struct CustomProviderSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: CustomProviderDraft
+    @State private var busy = false
+    @State private var confirmRemove = false
+
+    init(draft: CustomProviderDraft) {
+        _draft = State(initialValue: draft)
+    }
+
+    private var isActive: Bool {
+        draft.editingId != nil && draft.editingId == model.providerId
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $draft.name, prompt: Text("Together AI"))
+                    TextField("Endpoint URL", text: $draft.baseURL, prompt: Text("https://api.together.xyz/v1"))
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Picker("API format", selection: $draft.wire) {
+                        Text("OpenAI").tag("openai")
+                        Text("Anthropic").tag("anthropic")
+                        Text("Responses").tag("responses")
+                        Text("Auto").tag("auto")
+                    }
+                }
+
+                Section {
+                    Toggle("No API key required", isOn: $draft.keyless)
+                    if !draft.keyless {
+                        SecureField(
+                            "API key",
+                            text: $draft.apiKey,
+                            prompt: Text(draft.editingId == nil ? "Paste API key" : "Leave empty to keep current key")
+                        )
+                        .textContentType(.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    }
+                } footer: {
+                    Text("Turn on “No API key required” for local servers that do not use an API key.")
+                }
+
+                if let editingId = draft.editingId {
+                    Section {
+                        Button("Remove provider", role: .destructive) {
+                            confirmRemove = true
+                        }
+                        .disabled(busy || isActive)
+                    } footer: {
+                        if isActive {
+                            Text("Switch to another provider before removing this one.")
+                        } else {
+                            Text("Removes \(draft.name.isEmpty ? editingId : draft.name) and its stored API key.")
+                        }
+                    }
+                }
+
+                SettingsErrorSection()
+            }
+            .scrollContentBackground(.hidden)
+            .miloWallpaperBackground()
+            .navigationTitle(draft.editingId == nil ? "Add provider" : "Edit provider")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        busy = true
+                        Task {
+                            let ok = await model.saveCustomProvider(
+                                id: draft.editingId,
+                                name: draft.name,
+                                baseURL: draft.baseURL,
+                                wire: draft.wire,
+                                keyless: draft.keyless,
+                                apiKey: draft.keyless ? nil : draft.apiKey
+                            )
+                            busy = false
+                            if ok { dismiss() }
+                        }
+                    }
+                    .disabled(busy || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .confirmationDialog("Remove custom provider?", isPresented: $confirmRemove, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) {
+                    guard let editingId = draft.editingId else { return }
+                    busy = true
+                    Task {
+                        let ok = await model.removeCustomProvider(id: editingId)
+                        busy = false
+                        if ok { dismiss() }
+                    }
+                }
+            }
+        }
+        .tint(MiloTheme.accent)
+        .presentationBackground(MiloTheme.background)
     }
 }
 
@@ -1535,13 +1723,20 @@ private enum KeyGroup: String, CaseIterable {
         }
     }
 
-    func ids(presets: [SettingsOverview.Preset], auth: SettingsOverview.Auth?) -> [String] {
+    func ids(
+        presets: [SettingsOverview.Preset],
+        providerEntries: [String: SettingsOverview.ProviderConfig],
+        auth: SettingsOverview.Auth?
+    ) -> [String] {
         switch self {
         case .providers:
             // A signed-in provider has no key to paste, so it is not listed here —
             // even when an older daemon omits the `oauth` marker.
             var ids = presets.filter { $0.oauth == nil && $0.id != "chatgpt" }.map(\.id).filter { !$0.isEmpty && $0 != "groq" }
             let signedIn = Set(presets.filter { $0.oauth != nil || $0.id == "chatgpt" }.map(\.id))
+            for (id, entry) in providerEntries where id != "groq" && entry.keyless != true && entry.oauth == nil && !signedIn.contains(id) && !ids.contains(id) {
+                ids.append(id)
+            }
             for id in auth.map({ Array($0.providers.keys) }) ?? [] where id != "groq" && !signedIn.contains(id) && !ids.contains(id) {
                 ids.append(id)
             }
@@ -1618,14 +1813,14 @@ private struct ApiKeysSettingsView: View {
     /// Configured keys first, as the browser lists them, and the rest in the order the
     /// daemon offered — a list that reorders only when a key is actually added.
     private func ordered(_ group: KeyGroup) -> [String] {
-        let ids = group.ids(presets: model.presets, auth: model.auth)
+        let ids = group.ids(presets: model.presets, providerEntries: model.providerEntries, auth: model.auth)
         let configured = ids.filter { group.state(model.auth, id: $0)?.set == true }
         return configured + ids.filter { group.state(model.auth, id: $0)?.set != true }
     }
 
     private func name(group: KeyGroup, id: String) -> String {
         guard group == .providers else { return SettingsWording.of(id) }
-        return model.presets.first { $0.id == id }?.name ?? id
+        return model.providerEntries[id]?.name ?? model.presets.first { $0.id == id }?.name ?? id
     }
 
     @ViewBuilder

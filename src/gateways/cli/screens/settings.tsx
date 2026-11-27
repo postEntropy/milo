@@ -319,7 +319,7 @@ export function SettingsScreen({
   const history = useMemo(() => historyStatus(historyDir()), [view])
 
   /** The key rows, grouped, plus the cursor map that skips the group headers. */
-  const keys = keyLayout(auth)
+  const keys = keyLayout(auth, config)
 
   /**
    * Setup is where the layout is made: opening it creates the skills directory —
@@ -2430,7 +2430,7 @@ export function SettingsScreen({
           <Box flexDirection="column">
             <Text color={theme.accent}>
               {view.kind === 'keyEdit'
-                ? `${view.slot.label} — ${view.slot.env} (empty clears)`
+                ? `${view.slot.label}${view.slot.env ? ` — ${view.slot.env}` : ''} (empty clears)`
                 : view.kind === 'classifierEdit'
                   ? `${view.field === 'model' ? 'Classifier model' : 'Classifier URL'} (empty uses the backend default)`
                   : view.field === 'threshold'
@@ -2575,20 +2575,28 @@ function readInstalled(): InstalledSkill[] {
  * is the slots in the order they are shown, and `positions[i]` is where the i-th
  * one sits in the rendered list once the headers are counted in.
  */
-function keyLayout(auth: Auth): { items: MenuItem[]; order: KeySlot[]; positions: number[] } {
+function keyLayout(auth: Auth, config: Config): { items: MenuItem[]; order: KeySlot[]; positions: number[] } {
   const items: MenuItem[] = []
   const order: KeySlot[] = []
   const positions: number[] = []
+  const knownProviders = new Set(KEY_SLOTS.filter((entry) => entry.kind === 'provider').map((entry) => entry.id))
 
   for (const group of KEY_GROUPS) {
     items.push({ label: group.label, header: true })
-    for (const slot of KEY_SLOTS.filter((entry) => entry.kind === group.kind)) {
+    const slots = KEY_SLOTS.filter((entry) => entry.kind === group.kind)
+    if (group.kind === 'provider') {
+      for (const [id, entry] of Object.entries(config.providers)) {
+        if (knownProviders.has(id) || id === 'groq' || id === 'chatgpt' || entry.keyless || entry.oauth) continue
+        slots.push({ id, label: entry.name ?? id, env: entry.keyEnv ?? '', kind: 'provider' })
+      }
+    }
+    for (const slot of slots) {
       const state = keyState(slot, auth)
       positions.push(items.length)
       order.push(slot)
       items.push({
         label: slot.label,
-        hint: `${state} · ${slot.env}`,
+        hint: slot.env ? `${state} · ${slot.env}` : state,
         hintColor: state === 'not set' ? theme.danger : theme.success,
       })
     }
@@ -2599,13 +2607,13 @@ function keyLayout(auth: Auth): { items: MenuItem[]; order: KeySlot[]; positions
 
 function keyState(slot: KeySlot, auth: Auth): string {
   if (slot.kind === 'provider' || slot.kind === 'audio') {
-    if (process.env[slot.env]) return `env ${slot.env}`
+    if (slot.env && process.env[slot.env]) return `env ${slot.env}`
     return auth.providers[slot.id] ? 'stored' : 'not set'
   }
   if (slot.kind === 'search') {
-    if (process.env[slot.env]) return `env ${slot.env}`
+    if (slot.env && process.env[slot.env]) return `env ${slot.env}`
     return auth.search[slot.id] ? 'stored' : 'not set'
   }
-  if (process.env[slot.env]) return `env ${slot.env}`
+  if (slot.env && process.env[slot.env]) return `env ${slot.env}`
   return auth.gateways[slot.id] ? 'stored' : 'not set'
 }

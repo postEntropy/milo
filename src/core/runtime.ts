@@ -665,6 +665,11 @@ export class AgentRuntime {
     return this.options.providerSwitch?.name(this.options.provider.id) ?? this.options.provider.id
   }
 
+  /** Whether this runtime was wired to switch providers live. */
+  get canSwitchProvider(): boolean {
+    return Boolean(this.options.providerSwitch)
+  }
+
   get permissions(): PermissionPolicy | undefined {
     return this.options.permissionPolicy
   }

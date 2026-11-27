@@ -761,6 +761,7 @@ final class AppModel {
         settingsError = nil
         auth = nil
         presets = []
+        providerEntries = [:]
         chatGpt = nil
         chatGptLogin = nil
         chatGptPoll?.cancel()
@@ -2063,7 +2064,17 @@ final class AppModel {
     private(set) var chatGptLogin: SettingsOverview.ChatGptLogin?
     private var chatGptPoll: Task<Void, Never>?
     /** The provider entries last read from the daemon, for the one the app adds itself. */
-    private var providerEntries: [String: SettingsOverview.ProviderConfig] = [:]
+    private(set) var providerEntries: [String: SettingsOverview.ProviderConfig] = [:]
+
+    var customProviders: [(id: String, config: SettingsOverview.ProviderConfig)] {
+        let builtIn = Set(presets.map(\.id))
+        return providerEntries
+            .filter { id, _ in !builtIn.contains(id) && id != "groq" }
+            .map { (id: $0.key, config: $0.value) }
+            .sorted {
+                ($0.config.name ?? $0.id).localizedCaseInsensitiveCompare($1.config.name ?? $1.id) == .orderedAscending
+            }
+    }
     private(set) var gateways: [String: GatewaySettings] = [:]
     private(set) var web = WebSettings()
     private(set) var transcript = SessionsSettings()
@@ -2303,6 +2314,29 @@ final class AppModel {
     func removeSecret(group: String, id: String) async {
         guard await write({ try await MiloApi.removeSecret($0, group: group, id: id) }) else { return }
         await loadSettings()
+    }
+
+    func saveCustomProvider(
+        id: String?,
+        name: String,
+        baseURL: String,
+        wire: String,
+        keyless: Bool,
+        apiKey: String?
+    ) async -> Bool {
+        guard await write({
+            try await MiloApi.saveProvider($0, id: id, name: name, baseURL: baseURL, wire: wire, keyless: keyless, apiKey: apiKey)
+        }) else { return false }
+        providers = []
+        await loadSettings()
+        return true
+    }
+
+    func removeCustomProvider(id: String) async -> Bool {
+        guard await write({ try await MiloApi.removeProvider($0, id: id) }) else { return false }
+        providers = []
+        await loadSettings()
+        return true
     }
 
     // MARK: - ChatGPT sign-in

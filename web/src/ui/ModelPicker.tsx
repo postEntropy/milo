@@ -39,8 +39,10 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
   useEffect(() => {
     if (compact) searchRef.current?.focus()
   }, [compact])
-  const query = filter.trim().toLowerCase()
+  const trimmedFilter = filter.trim()
+  const query = trimmedFilter.toLowerCase()
   const shown = (catalog ?? []).filter((item) => `${item.id} ${item.name ?? ''}`.toLowerCase().includes(query))
+  const canUseManual = catalog !== null && trimmedFilter.length > 0 && !catalog.some((item) => item.id === trimmedFilter)
 
   return <div className={className}>
     <div className="model-picker-pane">
@@ -70,8 +72,18 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
         </button>}
       </label>
       <div className="model-picker-list">
+        {canUseManual && (
+          <button
+            type="button"
+            className={`model-picker-row${trimmedFilter === model && browsing === provider ? ' chosen' : ''}`}
+            onClick={() => onPick(trimmedFilter)}
+          >
+            <Icon name="plus" size={14} />
+            <span className="model-picker-name">Use “{trimmedFilter}”</span>
+          </button>
+        )}
         {catalog === null ? <p className="model-picker-note">Reading this provider’s models…</p>
-          : shown.length === 0 ? <p className="model-picker-note">{catalog.length === 0 ? note ?? 'This provider reports no models.' : 'No model matches that.'}</p>
+          : shown.length === 0 && !canUseManual ? <p className="model-picker-note">{catalog.length === 0 ? note ?? 'This provider reports no models. Type a model ID above to use it.' : 'No model matches that.'}</p>
             : shown.map((item) => {
               const isChosen = item.id === model && browsing === provider
               return <button

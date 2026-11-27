@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Text, useInput } from 'ink'
 import TextInput from 'ink-text-input'
 import Spinner from 'ink-spinner'
@@ -6,7 +6,8 @@ import { errorMessage } from '../../../util/errors.js'
 import { openBrowser } from '../../../util/terminal.js'
 import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../../../core/config/load.js'
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
-import { ConfigSchema, type Config, type ProviderEntry } from '../../../core/config/schema.js'
+import { ConfigSchema, type Config, type ProviderEntry, type WireInput } from '../../../core/config/schema.js'
+import { RESERVED_PROVIDER_IDS, isCustomProviderId, slugifyProviderId } from '../../../core/settings.js'
 import { beginChatGptBrowserLogin, type ChatGptLogin } from '../../../core/chatgpt/auth.js'
 import { chatGptModels } from '../../../core/chatgpt/models.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
@@ -15,9 +16,32 @@ import { MiloMark } from '../components/milo-mark.js'
 import { isCtrlC } from '../keys.js'
 import { theme as defaultTheme, type TuiTheme } from '../theme.js'
 
-type Step = 'provider' | 'key' | 'login' | 'loading' | 'models' | 'manual'
+type Step = 'provider' | 'customName' | 'customUrl' | 'customWire' | 'key' | 'login' | 'loading' | 'models' | 'manual'
+
+interface PickerProvider extends Preset {
+  custom?: boolean
+  addNew?: boolean
+}
+
+const ADD_CUSTOM_ID = '__add_custom__'
+
+const WIRE_CHOICES: ReadonlyArray<{ id: WireInput; label: string; hint: string }> = [
+  { id: 'openai', label: 'OpenAI-compatible', hint: '/chat/completions' },
+  { id: 'anthropic', label: 'Anthropic', hint: '/messages' },
+  { id: 'responses', label: 'OpenAI Responses', hint: '/responses' },
+  { id: 'auto', label: 'Auto', hint: 'Anthropic for Claude, OpenAI otherwise' },
+]
 
 const VISIBLE_ROWS = 12
+
+function nextCustomId(name: string, existing: Record<string, ProviderEntry>): string {
+  const base = slugifyProviderId(name) || 'custom'
+  if (!RESERVED_PROVIDER_IDS.has(base) && !(base in existing)) return base
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${base}-${suffix}`
+    if (!RESERVED_PROVIDER_IDS.has(candidate) && !(candidate in existing)) return candidate
+  }
+}
 
 export interface ModelPickerProps {
   current?: { provider: string; model: string }
@@ -27,11 +51,36 @@ export interface ModelPickerProps {
 }
 
 export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone, onCancel }: ModelPickerProps) {
+  const choices = useMemo<PickerProvider[]>(() => {
+    const existing = readConfig()?.providers ?? {}
+    const custom: PickerProvider[] = Object.entries(existing)
+      .filter(([id]) => isCustomProviderId(id))
+      .map(([id, entry]) => ({
+        id,
+        name: entry.name ?? id,
+        baseURL: entry.baseURL,
+        wire: entry.wire ?? 'openai',
+        keyless: entry.keyless,
+        keyEnv: entry.keyEnv,
+        models: [],
+        custom: true,
+      }))
+    return [
+      ...PRESETS,
+      ...custom,
+      { id: ADD_CUSTOM_ID, name: '+ Add custom provider', baseURL: '', wire: 'openai', models: [], addNew: true },
+    ]
+  }, [])
+
   const [step, setStep] = useState<Step>('provider')
   const [index, setIndex] = useState(() => {
-    const found = PRESETS.findIndex((preset) => preset.id === current?.provider)
+    const found = choices.findIndex((preset) => preset.id === current?.provider)
     return found >= 0 ? found : 0
   })
+  const [customName, setCustomName] = useState('')
+  const [customUrl, setCustomUrl] = useState('')
+  const [customWireIndex, setCustomWireIndex] = useState(0)
+  const [customKeyless, setCustomKeyless] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [manualModel, setManualModel] = useState('')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -40,8 +89,12 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
   const [notice, setNotice] = useState<string | null>(null)
   const [loginUrl, setLoginUrl] = useState<string | null>(null)
 
-  const preset: Preset = PRESETS[index] ?? PRESETS[0]!
-  const apiKeyValue = preset.keyless ? false : apiKey.trim() || undefined
+  const preset: PickerProvider = choices[index] ?? choices[0]!
+  const activeName = preset.addNew ? customName.trim() : preset.name
+  const activeBaseURL = preset.addNew ? customUrl.trim().replace(/\/+$/, '') : preset.baseURL
+  const activeWire: WireInput = preset.addNew ? (WIRE_CHOICES[customWireIndex]?.id ?? 'openai') : preset.wire
+  const activeKeyless = preset.addNew ? customKeyless : Boolean(preset.keyless)
+  const apiKeyValue = activeKeyless ? false : apiKey.trim() || undefined
 
   useEffect(() => {
     if (step !== 'loading') return
@@ -56,8 +109,8 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
           preset.oauth === 'chatgpt'
             ? chatGptModels()
             : await listModels({
-                baseURL: preset.baseURL,
-                wire: preset.wire,
+                baseURL: activeBaseURL,
+                wire: activeWire,
                 apiKey: apiKeyValue,
                 signal: controller.signal,
               })
@@ -84,7 +137,7 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
       cancelled = true
       controller.abort()
     }
-  }, [step, preset.baseURL, preset.wire, preset.oauth, preset.models[0], apiKeyValue, current?.model])
+  }, [step, activeBaseURL, activeWire, preset.oauth, preset.models[0], apiKeyValue, current?.model])
 
   useEffect(() => {
     if (step !== 'login') return
@@ -139,14 +192,54 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
     }
 
     if (step === 'provider') {
-      if (key.upArrow) setIndex((value) => (value - 1 + PRESETS.length) % PRESETS.length)
-      else if (key.downArrow) setIndex((value) => (value + 1) % PRESETS.length)
+      if (key.upArrow) setIndex((value) => (value - 1 + choices.length) % choices.length)
+      else if (key.downArrow) setIndex((value) => (value + 1) % choices.length)
       else if (key.return) {
+        if (preset.addNew) {
+          setCustomName('')
+          setCustomUrl('')
+          setCustomWireIndex(0)
+          setCustomKeyless(false)
+          setApiKey('')
+          setNotice(null)
+          setStep('customName')
+          return
+        }
+        setCustomKeyless(false)
+        setNotice(null)
         const signedIn = preset.oauth === 'chatgpt' ? Boolean(readAuth().chatgpt) : false
-        const hasKey = Boolean(resolveApiKey(preset.id, presetEntry(), readAuth()))
+        const resolved = resolveApiKey(preset.id, presetEntry(), readAuth())
+        if (typeof resolved === 'string') setApiKey(resolved)
+        const hasKey = Boolean(resolved)
         if (preset.oauth === 'chatgpt' && !signedIn) setStep('login')
         else setStep(preset.keyless || hasKey || signedIn ? 'loading' : 'key')
       } else if (key.escape) onCancel?.()
+      return
+    }
+    if (step === 'customName') {
+      if (key.escape) {
+        setNotice(null)
+        setStep('provider')
+      }
+      return
+    }
+    if (step === 'customUrl') {
+      if (key.escape) {
+        setNotice(null)
+        setStep('customName')
+      }
+      return
+    }
+    if (step === 'customWire') {
+      if (key.upArrow) setCustomWireIndex((value) => (value - 1 + WIRE_CHOICES.length) % WIRE_CHOICES.length)
+      else if (key.downArrow) setCustomWireIndex((value) => (value + 1) % WIRE_CHOICES.length)
+      else if (key.return) {
+        setNotice(null)
+        setStep('key')
+      } else if (key.escape) {
+        setNotice(null)
+        setStep('customUrl')
+      }
       return
     }
     if (step === 'models') {
@@ -155,16 +248,68 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
       else if (key.escape) onCancel?.()
       return
     }
-    if ((step === 'key' || step === 'manual' || step === 'login') && key.escape) onCancel?.()
+    if (step === 'key' && key.escape) {
+      if (preset.addNew) {
+        setNotice(null)
+        setStep('customWire')
+      } else onCancel?.()
+      return
+    }
+    if ((step === 'manual' || step === 'login') && key.escape) onCancel?.()
   })
+
+  const submitCustomName = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      setNotice('Enter a provider name.')
+      return
+    }
+    if (/[\r\n]/.test(trimmed)) {
+      setNotice('A provider name must fit on one line.')
+      return
+    }
+    setNotice(null)
+    setCustomName(trimmed)
+    setStep('customUrl')
+  }
+
+  const submitCustomUrl = (value: string) => {
+    const trimmed = value.trim()
+    try {
+      const parsed = new URL(trimmed)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setNotice('Enter a valid http:// or https:// endpoint URL.')
+        return
+      }
+    } catch {
+      setNotice('Enter a valid http:// or https:// endpoint URL.')
+      return
+    }
+    setNotice(null)
+    setCustomUrl(trimmed.replace(/\/+$/, ''))
+    setStep('customWire')
+  }
+
+  const submitKey = (value: string) => {
+    if (preset.addNew) {
+      const trimmed = value.trim()
+      setCustomKeyless(!trimmed)
+      setApiKey(trimmed)
+    }
+    setNotice(null)
+    setStep('loading')
+  }
 
   const finish = (chosen: string) => {
     const model = chosen.trim() || preset.models[0] || 'default'
     const existing = readConfig()
+    const targetId = preset.addNew
+      ? nextCustomId(activeName, existing?.providers ?? {})
+      : preset.id
 
-    if (!preset.keyless && apiKey.trim()) {
+    if (!activeKeyless && apiKey.trim()) {
       const auth = readAuth()
-      auth.providers[preset.id] = apiKey.trim()
+      auth.providers[targetId] = apiKey.trim()
       saveAuth(auth)
     }
 
@@ -173,17 +318,24 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
     // assembled from scratch would drop them — and take every comment with them,
     // which is the whole reason the config is YAML. `ConfigSchema.parse` is what
     // supplies the defaults on a first run, when there is nothing on disk yet.
-    const existingEntry = existing?.providers?.[preset.id]
-    const entry: ProviderEntry = {
-      ...(existingEntry?.headers ? { headers: existingEntry.headers } : {}),
-      ...(existingEntry?.nativePdf !== undefined ? { nativePdf: existingEntry.nativePdf } : {}),
-      ...presetEntry(),
-    }
+    const existingEntry = existing?.providers?.[targetId]
+    const entry: ProviderEntry = preset.addNew
+      ? {
+          name: activeName,
+          baseURL: activeBaseURL,
+          wire: activeWire,
+          ...(activeKeyless ? { keyless: true } : {}),
+        }
+      : {
+          ...(existingEntry?.headers ? { headers: existingEntry.headers } : {}),
+          ...(existingEntry?.nativePdf !== undefined ? { nativePdf: existingEntry.nativePdf } : {}),
+          ...presetEntry(),
+        }
     const config: Config = ConfigSchema.parse({
       ...(existing ?? {}),
-      provider: preset.id,
+      provider: targetId,
       model,
-      providers: { ...(existing?.providers ?? {}), [preset.id]: entry },
+      providers: { ...(existing?.providers ?? {}), [targetId]: entry },
     })
 
     saveConfig(config)
@@ -210,15 +362,17 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
             <Text bold>Choose a provider</Text>
             <Text color={activeTheme.muted}> · ↑/↓ move · Enter select · Esc cancel</Text>
           </Box>
-          {PRESETS.map((item, itemIndex) => {
+          {choices.map((item, itemIndex) => {
             const isSelected = itemIndex === index
-            const isCurrent = current?.provider === item.id
+            const isCurrent = !item.addNew && current?.provider === item.id
             const tag =
               item.oauth === 'chatgpt'
                 ? ' (ChatGPT sign-in)'
                 : item.keyless
                   ? ' (no key needed)'
-                  : ''
+                  : item.custom
+                    ? ' (custom)'
+                    : ''
             return (
               <Text key={item.id}>
                 <Text bold={isSelected} color={isSelected ? activeTheme.accent : undefined}>
@@ -235,16 +389,71 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
         </Box>
       )}
 
+      {step === 'customName' && (
+        <Box flexDirection="column">
+          {notice && <Text color={activeTheme.danger}>{notice}</Text>}
+          <Text>Custom provider name (for example Together AI or Local vLLM):</Text>
+          <Box backgroundColor={activeTheme.surface} paddingX={2} marginTop={1}>
+            <Text bold color={activeTheme.surfaceText}>
+              ❯{' '}
+            </Text>
+            <TextInput value={customName} onChange={setCustomName} onSubmit={submitCustomName} />
+          </Box>
+          <Box marginTop={1}>
+            <Text color={activeTheme.muted}>Enter continue · Esc back</Text>
+          </Box>
+        </Box>
+      )}
+
+      {step === 'customUrl' && (
+        <Box flexDirection="column">
+          {notice && <Text color={activeTheme.danger}>{notice}</Text>}
+          <Text>Endpoint base URL for {activeName} (for example https://api.together.xyz/v1):</Text>
+          <Box backgroundColor={activeTheme.surface} paddingX={2} marginTop={1}>
+            <Text bold color={activeTheme.surfaceText}>
+              ❯{' '}
+            </Text>
+            <TextInput value={customUrl} onChange={setCustomUrl} onSubmit={submitCustomUrl} />
+          </Box>
+          <Box marginTop={1}>
+            <Text color={activeTheme.muted}>Enter continue · Esc back</Text>
+          </Box>
+        </Box>
+      )}
+
+      {step === 'customWire' && (
+        <Box flexDirection="column">
+          <Box marginBottom={1}>
+            <Text bold>API format for {activeName}</Text>
+            <Text color={activeTheme.muted}> · ↑/↓ move · Enter select · Esc back</Text>
+          </Box>
+          {WIRE_CHOICES.map((wire, wireIndex) => {
+            const isSelected = wireIndex === customWireIndex
+            return (
+              <Text key={wire.id}>
+                <Text bold={isSelected} color={isSelected ? activeTheme.accent : undefined}>
+                  {isSelected ? '❯ ' : '  '}
+                  {wire.label}
+                </Text>
+                <Text color={isSelected ? activeTheme.accent : activeTheme.muted}>{` (${wire.hint})`}</Text>
+              </Text>
+            )
+          })}
+        </Box>
+      )}
+
       {step === 'key' && (
         <Box flexDirection="column">
           <Text>
-            Paste your {preset.name} API key{preset.keyURL ? ` (from ${preset.keyURL})` : ''}:
+            {preset.addNew
+              ? `Paste your ${activeName} API key (or press Enter if no key is needed):`
+              : `Paste your ${preset.name} API key${preset.keyURL ? ` (from ${preset.keyURL})` : ''}:`}
           </Text>
           <Box backgroundColor={activeTheme.surface} paddingX={2} marginTop={1}>
             <Text bold color={activeTheme.surfaceText}>
               ❯{' '}
             </Text>
-            <TextInput value={apiKey} onChange={setApiKey} mask="*" onSubmit={() => setStep('loading')} />
+            <TextInput value={apiKey} onChange={setApiKey} mask="*" onSubmit={submitKey} />
           </Box>
         </Box>
       )}
@@ -265,7 +474,7 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
 
       {step === 'loading' && (
         <Text color={activeTheme.accent}>
-          <Spinner type="dots" /> Fetching models from {preset.name}…
+          <Spinner type="dots" /> Fetching models from {activeName}…
         </Text>
       )}
 

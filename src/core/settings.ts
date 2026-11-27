@@ -1,8 +1,12 @@
 import { readAuth, readConfig, saveAuth, saveConfig } from './config/load.js'
+import { PRESETS } from './config/presets.js'
 import {
   ConfigSchema,
+  WireSchema,
   type Auth,
   type Config,
+  type ProviderEntry,
+  type WireInput,
 } from './config/schema.js'
 import { errorMessage } from '../util/errors.js'
 
@@ -11,6 +15,164 @@ export type SettingsResult<T = Config> =
   | { ok: false; error: string }
 
 export type SecretGroup = 'providers' | 'search' | 'gateways'
+
+export const RESERVED_PROVIDER_IDS = new Set([...PRESETS.map((preset) => preset.id), 'groq'])
+export const PROVIDER_WIRES: readonly WireInput[] = ['openai', 'anthropic', 'responses', 'auto']
+
+export interface CustomProviderInput {
+  id?: string
+  name: string
+  baseURL: string
+  wire?: WireInput
+  keyless?: boolean
+  apiKey?: string
+  keyEnv?: string
+  allowMissingKey?: boolean
+}
+
+const CUSTOM_PROVIDER_ID = /^[a-z0-9][a-z0-9_-]*$/
+const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+export function isCustomProviderId(id: string): boolean {
+  return Boolean(id) && !RESERVED_PROVIDER_IDS.has(id)
+}
+
+export function slugifyProviderId(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '')
+}
+
+function nextCustomProviderId(base: string, existing: Record<string, ProviderEntry>): string {
+  const root = base || 'custom'
+  if (!RESERVED_PROVIDER_IDS.has(root) && !(root in existing)) return root
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${root}-${suffix}`
+    if (!RESERVED_PROVIDER_IDS.has(candidate) && !(candidate in existing)) return candidate
+  }
+}
+
+export function saveCustomProvider(
+  input: CustomProviderInput,
+): SettingsResult<{ id: string; entry: ProviderEntry; created: boolean }> {
+  const current = readConfig()
+  if (!current) return { ok: false, error: 'Milo is not configured.' }
+
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  if (!name) return { ok: false, error: 'Enter a provider name.' }
+  if (/[\r\n]/.test(name)) return { ok: false, error: 'A provider name must fit on one line.' }
+  if (name.length > 80) return { ok: false, error: 'Provider name must be 80 characters or fewer.' }
+
+  const rawUrl = typeof input.baseURL === 'string' ? input.baseURL.trim() : ''
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(rawUrl)
+  } catch {
+    return { ok: false, error: 'Enter a valid http:// or https:// endpoint URL.' }
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    return { ok: false, error: 'Enter a valid http:// or https:// endpoint URL.' }
+  }
+  const baseURL = rawUrl.replace(/\/+$/, '')
+
+  const wireParsed = WireSchema.safeParse(input.wire ?? 'openai')
+  if (!wireParsed.success) {
+    return { ok: false, error: 'Choose a valid API format (openai, anthropic, responses, or auto).' }
+  }
+  const wire = wireParsed.data
+
+  let id: string
+  if (input.id !== undefined && input.id.trim() !== '') {
+    id = input.id.trim().toLowerCase()
+    if (!CUSTOM_PROVIDER_ID.test(id)) {
+      return {
+        ok: false,
+        error: 'Provider id must start with a letter or digit and use only letters, digits, hyphens, or underscores.',
+      }
+    }
+    if (RESERVED_PROVIDER_IDS.has(id)) {
+      return { ok: false, error: `"${id}" is reserved for a built-in provider.` }
+    }
+  } else {
+    id = nextCustomProviderId(slugifyProviderId(name) || 'custom', current.providers)
+  }
+
+  const created = !(id in current.providers)
+  const keyless = input.keyless === true
+  const trimmedKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
+  const rawKeyEnv = typeof input.keyEnv === 'string' ? input.keyEnv.trim() : undefined
+  if (rawKeyEnv && !ENV_VAR_NAME.test(rawKeyEnv)) {
+    return {
+      ok: false,
+      error: 'Environment variable name must contain only letters, digits, and underscores.',
+    }
+  }
+  const existing = current.providers[id]
+  const effectiveKeyEnv = keyless ? undefined : rawKeyEnv !== undefined ? (rawKeyEnv || undefined) : existing?.keyEnv
+  const envValue = effectiveKeyEnv ? process.env[effectiveKeyEnv]?.trim() : undefined
+  const auth = readAuth()
+  if (!keyless && !trimmedKey && !auth.providers[id]?.trim() && !envValue && !input.allowMissingKey) {
+    return { ok: false, error: 'Enter an API key, or turn on "No API key required".' }
+  }
+
+  const entry: ProviderEntry = {
+    ...(existing?.headers ? { headers: existing.headers } : {}),
+    ...(existing?.nativePdf !== undefined ? { nativePdf: existing.nativePdf } : {}),
+    ...(effectiveKeyEnv ? { keyEnv: effectiveKeyEnv } : {}),
+    name,
+    baseURL,
+    wire,
+    ...(keyless ? { keyless: true } : {}),
+  }
+
+  const configRes = mutateConfig((cfg) => {
+    cfg.providers[id] = entry
+  })
+  if (!configRes.ok) return configRes
+
+  if (keyless || trimmedKey) {
+    const authRes = mutateAuth((nextAuth) => {
+      if (keyless) delete nextAuth.providers[id]
+      else nextAuth.providers[id] = trimmedKey
+    })
+    if (!authRes.ok) return authRes
+  }
+
+  return { ok: true, value: { id, entry, created } }
+}
+
+export function removeCustomProvider(id: string): SettingsResult<{ id: string }> {
+  const trimmed = typeof id === 'string' ? id.trim() : ''
+  if (!trimmed || !isCustomProviderId(trimmed)) {
+    return { ok: false, error: 'Built-in providers cannot be removed.' }
+  }
+
+  const current = readConfig()
+  if (!current) return { ok: false, error: 'Milo is not configured.' }
+  if (!(trimmed in current.providers)) {
+    return { ok: false, error: `Provider "${trimmed}" was not found.` }
+  }
+  if (current.provider === trimmed) {
+    return { ok: false, error: 'Switch to another provider before removing this one.' }
+  }
+
+  const configRes = mutateConfig((cfg) => {
+    delete cfg.providers[trimmed]
+  })
+  if (!configRes.ok) return configRes
+
+  const authRes = mutateAuth((nextAuth) => {
+    delete nextAuth.providers[trimmed]
+  })
+  if (!authRes.ok) return authRes
+
+  return { ok: true, value: { id: trimmed } }
+}
 
 /**
  * Loads current configuration, applies mutations, validates with ConfigSchema,

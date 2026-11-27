@@ -46,10 +46,12 @@ export function MobileModelSheet({
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
     }
   }, [onClose])
-  const query = filter.trim().toLowerCase()
+  const trimmedFilter = filter.trim()
+  const query = trimmedFilter.toLowerCase()
   const shown = (catalog ?? []).filter((item) =>
     `${item.id} ${item.name ?? ''}`.toLowerCase().includes(query),
   )
+  const canUseManual = catalog !== null && trimmedFilter.length > 0 && !catalog.some((item) => item.id === trimmedFilter)
 
   return (
     <div className="mobile-model-sheet" role="dialog" aria-modal="true" aria-label="Select model">
@@ -107,12 +109,27 @@ export function MobileModelSheet({
       </div>
 
       <div className="mobile-model-list">
+        {canUseManual && (
+          <button
+            type="button"
+            className={`mobile-model-item${trimmedFilter === model && browsing === provider ? ' chosen' : ''}`}
+            onClick={() => {
+              onPick(trimmedFilter)
+              onClose()
+            }}
+          >
+            <div className="mobile-model-item-main">
+              <span className="mobile-model-item-id">Use “{trimmedFilter}”</span>
+            </div>
+            <Icon name="plus" size={16} />
+          </button>
+        )}
         {catalog === null ? (
           <p className="model-picker-note">Reading this provider’s models…</p>
-        ) : shown.length === 0 ? (
+        ) : shown.length === 0 && !canUseManual ? (
           <p className="model-picker-note">
             {catalog.length === 0
-              ? 'This provider reports no models.'
+              ? 'This provider reports no models. Type a model ID above to use it.'
               : 'No model matches that.'}
           </p>
         ) : (

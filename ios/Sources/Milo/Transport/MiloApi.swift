@@ -439,6 +439,32 @@ enum MiloApi {
         _ = try await call("remove-secret", ["group": group, "id": id], account: account, as: Ack.self)
     }
 
+    static func saveProvider(
+        _ account: Account,
+        id: String?,
+        name: String,
+        baseURL: String,
+        wire: String,
+        keyless: Bool,
+        apiKey: String?
+    ) async throws {
+        var body: [String: Any] = [
+            "name": name,
+            "baseURL": baseURL,
+            "wire": wire,
+            "keyless": keyless,
+        ]
+        if let id, !id.isEmpty { body["id"] = id }
+        if let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["apiKey"] = apiKey
+        }
+        _ = try await call("save-provider", body, account: account, as: Ack.self)
+    }
+
+    static func removeProvider(_ account: Account, id: String) async throws {
+        _ = try await call("remove-provider", ["id": id], account: account, as: Ack.self)
+    }
+
     /// The settings screen's one read: the config on disk, and what the runtime
     /// is actually running, which is not always the same thing.
     static func overview(_ account: Account) async throws -> SettingsOverview {

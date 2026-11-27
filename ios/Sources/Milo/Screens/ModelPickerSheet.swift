@@ -44,6 +44,21 @@ struct ModelPickerSheet: View {
                             Text("Reading the catalog…").foregroundStyle(MiloTheme.muted)
                         }
                     }
+                    if let manual = manualModelId {
+                        Button {
+                            Task {
+                                if await model.choose(manual, from: provider) { dismiss() }
+                            }
+                        } label: {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                Image(systemName: "plus.circle")
+                                    .foregroundStyle(MiloTheme.accent)
+                                Text("Use “\(manual)”")
+                                    .foregroundStyle(MiloTheme.foreground)
+                                Spacer()
+                            }
+                        }
+                    }
                     ForEach(matches) { entry in
                         Button {
                             Task {
@@ -74,7 +89,7 @@ struct ModelPickerSheet: View {
                     // A list that came back with nothing says which nothing it is, rather
                     // than leaving the section blank under the field — and a refusal wears
                     // the tone a failure wears.
-                    if matches.isEmpty && !model.modelsLoading {
+                    if matches.isEmpty && !model.modelsLoading && manualModelId == nil {
                         Text(emptyLine)
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(model.modelsError == nil ? MiloTheme.muted : MiloTheme.danger)
@@ -131,11 +146,18 @@ struct ModelPickerSheet: View {
         }
     }
 
+    private var manualModelId: String? {
+        guard !model.modelsLoading, provider == model.catalogProvider else { return nil }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !model.models.contains(where: { $0.id == trimmed }) else { return nil }
+        return trimmed
+    }
+
     /// Why the section is empty: the reason the catalog never came, the field matching
     /// nothing in one that did, or a catalog that holds nothing at all — the browser's own
     /// words for the last.
     private var emptyLine: String {
         if let reason = model.modelsError { return reason }
-        return model.models.isEmpty ? "No models found." : "No models match."
+        return model.models.isEmpty ? "This provider reports no models. Type a model ID above to use it." : "No models match."
     }
 }

@@ -2,7 +2,10 @@ import { analyticsDetail, analyticsReport, analyticsTurns, sessionTraces } from 
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
+  PROVIDER_WIRES,
   mutateConfig,
+  removeCustomProvider,
+  saveCustomProvider,
   saveSecret as coreSaveSecret,
   removeSecret as coreRemoveSecret,
   type SecretGroup,
@@ -32,6 +35,7 @@ import {
   listProviderModels,
   readAuth,
   readConfig,
+  resolveProvider,
   saveConfig,
   setDisplay,
   setPermissionMode,
@@ -58,6 +62,7 @@ import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
   type Config,
+  type WireInput,
 } from '../../core/config/schema.js'
 import { chromeVersion, copyProfile, findProfiles, listBrowsers, tryInstall } from '../../core/browser/index.js'
 import { INSTALL_SCOPE, memoryStatus } from '../../core/memory/index.js'
@@ -129,6 +134,8 @@ export class WebSettings {
       case 'set-effort': return this.setEffort(body)
       case 'providers': return listProviders()
       case 'set-provider': return this.setProvider(body)
+      case 'save-provider': return this.saveProvider(body)
+      case 'remove-provider': return this.removeProvider(body)
       case 'save-secret': return this.saveSecret(body)
       case 'remove-secret': return this.removeSecret(body)
       case 'chatgpt-login': return this.chatGptLogin(body)
@@ -472,6 +479,7 @@ export class WebSettings {
         searchProviders: SEARCH_PROVIDERS,
         classifierBackends: CLASSIFIER_BACKENDS,
         colorPalettes: COLOR_PALETTES,
+        wires: PROVIDER_WIRES,
       },
     }
   }
@@ -532,6 +540,14 @@ export class WebSettings {
       // switch the composer and `/provider` reach; no restart.
       if (next.provider !== current.provider) this.runtime.setDefaultProvider(next.provider, next.model)
       else if (next.model !== current.model) this.runtime.setDefaultModel(next.model)
+      if (
+        next.provider === current.provider &&
+        JSON.stringify(next.providers[next.provider]) !== JSON.stringify(current.providers[current.provider]) &&
+        this.runtime.canSwitchProvider &&
+        resolveProvider(next, readAuth(), next.provider)?.apiKey !== undefined
+      ) {
+        this.runtime.setDefaultProvider(next.provider, next.model)
+      }
       if (
         'palette' in patchConfig ||
         next.palette.sync !== current.palette.sync ||
@@ -621,7 +637,39 @@ export class WebSettings {
         ? coreSaveSecret('providers', 'groq', value)
         : coreSaveSecret(group as SecretGroup, id, value)
       if (!res.ok) throw new Error(res.error)
+      if (res.value && group === 'providers' && id === this.runtime.provider.id && this.runtime.canSwitchProvider) {
+        const config = readConfig()
+        if (config && resolveProvider(config, readAuth(), id)?.apiKey !== undefined) {
+          this.runtime.setDefaultProvider(id, this.runtime.model)
+        }
+      }
       return { saved: res.value }
+    })
+  }
+
+  private async saveProvider(body: Record<string, unknown>): Promise<unknown> {
+    return this.serialize(() => {
+      const res = saveCustomProvider({
+        id: optionalText(body.id),
+        name: typeof body.name === 'string' ? body.name : '',
+        baseURL: typeof body.baseURL === 'string' ? body.baseURL : '',
+        wire: typeof body.wire === 'string' ? (body.wire as WireInput) : undefined,
+        keyless: body.keyless === true,
+        apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
+      })
+      if (!res.ok) throw new Error(res.error)
+      if (res.value.id === this.runtime.provider.id && this.runtime.canSwitchProvider) {
+        this.runtime.setProvider(res.value.id, this.runtime.model)
+      }
+      return res.value
+    })
+  }
+
+  private async removeProvider(body: Record<string, unknown>): Promise<unknown> {
+    return this.serialize(() => {
+      const res = removeCustomProvider(typeof body.id === 'string' ? body.id : '')
+      if (!res.ok) throw new Error(res.error)
+      return { removed: true, id: res.value.id }
     })
   }
 

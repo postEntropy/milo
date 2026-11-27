@@ -29,6 +29,28 @@ import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthro
 import { chatGptPlanName } from '../../../src/core/chatgpt/plan.ts'
 import { computerSetupHelp, type ComputerStatusWithHelp } from '../../../src/core/computer/setup-help.ts'
 
+type ProviderWire = 'openai' | 'anthropic' | 'responses' | 'auto'
+type ProviderFormState = {
+  editingId?: string
+  name: string
+  baseURL: string
+  wire: ProviderWire
+  keyless: boolean
+  apiKey: string
+}
+const WIRE_LABELS: Record<ProviderWire, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  responses: 'Responses',
+  auto: 'Auto',
+}
+const WIRE_CHOICES: ReadonlyArray<{ value: ProviderWire; label: string }> = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'responses', label: 'Responses' },
+  { value: 'auto', label: 'Auto' },
+]
+
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; oauth?: 'chatgpt'; models: string[]; keyURL?: string }
 type ChatGptStatus = { signedIn: boolean; email?: string; planType?: string; planName?: string; expiresAt?: number; codexLogin?: boolean }
 type SettingsConfig = {
@@ -292,6 +314,8 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
   const [modelSheetOpen, setModelSheetOpen] = useState(false)
   const [startingHelp, setStartingHelp] = useState(false)
+  const [providerForm, setProviderForm] = useState<ProviderFormState | null>(null)
+  const [providerSaving, setProviderSaving] = useState(false)
   const phone = usePhone()
   const current = section ?? (phone ? null : 'provider')
 
@@ -378,6 +402,20 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
 
   const currentProvider = draft?.provider ?? ''
   const browsedProvider = browsing ?? currentProvider
+  const presetIds = new Set(data?.presets.map((item) => item.id) ?? [])
+  const customProviders = draft
+    ? Object.entries(draft.providers)
+        .filter(([id]) => !presetIds.has(id) && id !== 'groq')
+        .map(([id, entry]) => ({
+          id,
+          name: entry.name ?? id,
+          baseURL: entry.baseURL,
+          wire: (entry.wire ?? 'openai') as ProviderWire,
+          keyless: entry.keyless,
+          models: [] as string[],
+        }))
+    : []
+  const allProviders = [...(data?.presets ?? []), ...customProviders]
 
   const refreshChatGpt = useCallback(async (): Promise<void> => {
     try {
@@ -465,6 +503,56 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
       }
     } catch (error) { setNotice({ text: message(error), error: true }) }
     finally { setSaving(false) }
+  }
+
+  async function saveCustomProviderForm(): Promise<void> {
+    if (!providerForm) return
+    setProviderSaving(true)
+    try {
+      const saved = await api<{ id: string; created: boolean }>('save-provider', {
+        ...(providerForm.editingId ? { id: providerForm.editingId } : {}),
+        name: providerForm.name,
+        baseURL: providerForm.baseURL,
+        wire: providerForm.wire,
+        keyless: providerForm.keyless,
+        ...(providerForm.keyless || !providerForm.apiKey.trim() ? {} : { apiKey: providerForm.apiKey }),
+      })
+      setProviderForm(null)
+      await reload()
+      setBrowsing(saved.id)
+      setNotice({ text: saved.created ? 'Custom provider added.' : 'Custom provider updated.', error: false })
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+    finally { setProviderSaving(false) }
+  }
+
+  async function removeCustomProviderEntry(id: string, label: string): Promise<void> {
+    if (!window.confirm(`Remove custom provider “${label}”?`)) return
+    setProviderSaving(true)
+    try {
+      await api('remove-provider', { id })
+      if (providerForm?.editingId === id) setProviderForm(null)
+      if (browsing === id) setBrowsing(null)
+      await reload()
+      setNotice({ text: 'Custom provider removed.', error: false })
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+    finally { setProviderSaving(false) }
+  }
+
+  function openAddProvider(): void {
+    setProviderForm({ name: '', baseURL: '', wire: 'openai', keyless: false, apiKey: '' })
+  }
+
+  function openEditProvider(id: string): void {
+    const entry = draft?.providers?.[id]
+    if (!entry) return
+    setProviderForm({
+      editingId: id,
+      name: entry.name ?? id,
+      baseURL: entry.baseURL,
+      wire: (entry.wire as ProviderWire) ?? 'openai',
+      keyless: Boolean(entry.keyless),
+      apiKey: '',
+    })
   }
 
   function switchProvider(next: string): void {
@@ -612,7 +700,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                     </span>
                     <span className="mobile-model-card-name">{draft.model}</span>
                     <span className="mobile-model-card-provider">
-                      {data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider}
+                      {allProviders.find((item) => item.id === draft.provider)?.name ?? draft.provider}
                     </span>
                   </div>
                   <button
@@ -628,7 +716,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                 </div>
                 {modelSheetOpen && (
                   <MobileModelSheet
-                    presets={data.presets}
+                    presets={allProviders}
                     provider={draft.provider}
                     model={draft.model}
                     browsing={browsedProvider}
@@ -641,7 +729,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
               </>
             ) : (
               <ModelPicker
-                presets={data.presets}
+                presets={allProviders}
                 provider={draft.provider}
                 model={draft.model}
                 browsing={browsedProvider}
@@ -654,6 +742,134 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             {(draft.provider === 'chatgpt' || browsedProvider === 'chatgpt') && (
               <ChatGptAccount status={data.chatgpt} onChanged={refreshChatGpt} />
             )}
+
+            <SettingsGroup
+              title="Custom providers"
+              action={!providerForm && (
+                <button className="button settings-btn-sm" type="button" onClick={openAddProvider}>
+                  Add provider
+                </button>
+              )}
+            >
+              {customProviders.length === 0 && !providerForm && (
+                <div className="settings-row">
+                  <p className="settings-row-desc">
+                    Connect any OpenAI-compatible, Anthropic, or local endpoint with its own API key.
+                  </p>
+                </div>
+              )}
+              {customProviders.map((item) => {
+                const keySet = Boolean(data.auth.providers?.[item.id]?.set)
+                const isActive = item.id === data.config.provider
+                const statusLabel = item.keyless ? 'No key required' : keySet ? 'Key set' : 'No key'
+                return (
+                  <SettingRow
+                    key={item.id}
+                    label={
+                      <span className="settings-key-identity">
+                        <ProviderMark id={item.id} size={15} />
+                        <span>{item.name}</span>
+                      </span>
+                    }
+                    description={`${item.baseURL} · ${WIRE_LABELS[item.wire] ?? item.wire} · ${statusLabel}`}
+                  >
+                    <div className="settings-inline-actions">
+                      <button
+                        className="button settings-btn-sm"
+                        type="button"
+                        disabled={providerSaving}
+                        onClick={() => openEditProvider(item.id)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="button danger settings-btn-sm"
+                        type="button"
+                        disabled={providerSaving || isActive}
+                        title={isActive ? 'Switch to another provider before removing this one' : undefined}
+                        onClick={() => void removeCustomProviderEntry(item.id, item.name)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </SettingRow>
+                )
+              })}
+              {providerForm && (
+                <>
+                  <SettingStack label="Name" htmlFor="custom-provider-name">
+                    <input
+                      id="custom-provider-name"
+                      className="settings-input"
+                      placeholder="Together AI"
+                      value={providerForm.name}
+                      onChange={(event) => setProviderForm((cur) => cur ? { ...cur, name: event.target.value } : cur)}
+                    />
+                  </SettingStack>
+                  <SettingStack label="Endpoint URL" htmlFor="custom-provider-url">
+                    <input
+                      id="custom-provider-url"
+                      className="settings-input"
+                      type="url"
+                      placeholder="https://api.together.xyz/v1"
+                      value={providerForm.baseURL}
+                      onChange={(event) => setProviderForm((cur) => cur ? { ...cur, baseURL: event.target.value } : cur)}
+                    />
+                  </SettingStack>
+                  <SettingRow label="API format" description="Wire protocol the endpoint speaks.">
+                    <Segmented
+                      label="API format"
+                      value={providerForm.wire}
+                      choices={WIRE_CHOICES}
+                      onChange={(wire) => setProviderForm((cur) => cur ? { ...cur, wire } : cur)}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label="No API key required"
+                    description="Turn on for local servers that do not use an API key."
+                  >
+                    <Switch
+                      label="No API key required"
+                      checked={providerForm.keyless}
+                      onChange={(keyless) => setProviderForm((cur) => cur ? { ...cur, keyless } : cur)}
+                    />
+                  </SettingRow>
+                  {!providerForm.keyless && (
+                    <SettingStack label="API key" htmlFor="custom-provider-key">
+                      <input
+                        id="custom-provider-key"
+                        className="settings-input"
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={providerForm.editingId ? 'Leave empty to keep current key' : 'Paste API key…'}
+                        value={providerForm.apiKey}
+                        onChange={(event) => setProviderForm((cur) => cur ? { ...cur, apiKey: event.target.value } : cur)}
+                      />
+                    </SettingStack>
+                  )}
+                  <div className="settings-row">
+                    <div className="settings-inline-actions">
+                      <button
+                        className="button primary settings-btn-sm"
+                        type="button"
+                        disabled={providerSaving}
+                        onClick={() => void saveCustomProviderForm()}
+                      >
+                        {providerSaving ? 'Saving…' : 'Save provider'}
+                      </button>
+                      <button
+                        className="button settings-btn-sm"
+                        type="button"
+                        disabled={providerSaving}
+                        onClick={() => setProviderForm(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </SettingsGroup>
 
             <SettingsGroup title="Generation">
               <SettingRow
@@ -734,7 +950,11 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             <div className="settings-groups-stack">
               {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
                 const ids = group === 'providers'
-                  ? [...new Set([...data.presets.filter((item) => !item.oauth && item.id !== 'chatgpt').map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq' && id !== 'chatgpt' && !data.presets.some((item) => item.id === id && item.oauth))
+                  ? [...new Set([
+                      ...data.presets.filter((item) => !item.oauth && item.id !== 'chatgpt').map((item) => item.id),
+                      ...Object.entries(data.config.providers).filter(([, entry]) => !entry.keyless && !entry.oauth).map(([id]) => id),
+                      ...Object.keys(data.auth.providers),
+                    ])].filter((id) => id !== 'groq' && id !== 'chatgpt' && !data.presets.some((item) => item.id === id && item.oauth))
                   : group === 'audio' ? ['groq']
                   : group === 'search' ? ['tavily', 'exa', 'parallel']
                   : ['telegram', 'discord']
@@ -748,7 +968,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                       const slot = `${group}:${id}`
                       const editing = editingSecret === slot
                       const serviceName = group === 'providers'
-                        ? data.presets.find((preset) => preset.id === id)?.name ?? id
+                        ? data.config.providers[id]?.name ?? data.presets.find((preset) => preset.id === id)?.name ?? id
                         : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
                       return (
                         <div className={`settings-row settings-key-row${editing ? ' is-editing' : ''}`} key={slot}>

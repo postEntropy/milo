@@ -1907,3 +1907,63 @@ describe('Computer Use setup help across WebSettings and WebHub', () => {
     expect(releaseTurnSpy).toHaveBeenCalled()
   })
 })
+
+describe('web custom providers', () => {
+  it('saves, lists, updates live, and removes custom providers', async () => {
+    writeConfig()
+    const runtime = buildSwitchable()
+    const settings = new WebSettings(runtime, home)
+
+    const saved = await settings.handle('save-provider', {
+      name: 'Together AI',
+      baseURL: 'https://api.together.xyz/v1/',
+      wire: 'openai',
+      apiKey: 'together-secret',
+    }) as { id: string; created: boolean; entry: { name?: string; baseURL: string; wire?: string } }
+
+    expect(saved).toEqual({
+      id: 'together-ai',
+      created: true,
+      entry: {
+        name: 'Together AI',
+        baseURL: 'https://api.together.xyz/v1',
+        wire: 'openai',
+      },
+    })
+
+    const providers = await settings.handle('providers') as Array<{ id: string; name: string }>
+    expect(providers).toContainEqual({ id: 'together-ai', name: 'Together AI' })
+
+    const overview = await settings.handle('overview') as {
+      config: { providers: Record<string, { name?: string; baseURL: string }> }
+      auth: { providers: Record<string, { set: boolean }> }
+      options: { wires: string[] }
+    }
+    expect(overview.config.providers['together-ai']?.baseURL).toBe('https://api.together.xyz/v1')
+    expect(overview.auth.providers['together-ai']?.set).toBe(true)
+    expect(overview.options.wires).toEqual(['openai', 'anthropic', 'responses', 'auto'])
+
+    // Switching onto the custom provider, then editing it refreshes the active runtime live.
+    await settings.handle('set-provider', { provider: 'together-ai' })
+    expect(runtime.provider.id).toBe('together-ai')
+
+    await settings.handle('save-provider', {
+      id: 'together-ai',
+      name: 'Together Updated',
+      baseURL: 'https://api.together.xyz/v2',
+      wire: 'anthropic',
+    })
+    expect(readConfig()?.providers['together-ai']?.baseURL).toBe('https://api.together.xyz/v2')
+
+    // Refuses removing the active provider or a preset.
+    await expect(settings.handle('remove-provider', { id: 'together-ai' })).rejects.toThrow('Switch to another provider')
+    await expect(settings.handle('remove-provider', { id: 'openai' })).rejects.toThrow('Built-in providers cannot be removed.')
+
+    // Switching away allows removal.
+    await settings.handle('save-secret', { group: 'providers', id: 'test', value: 'test-key' })
+    await settings.handle('set-provider', { provider: 'test' })
+    const removed = await settings.handle('remove-provider', { id: 'together-ai' })
+    expect(removed).toEqual({ removed: true, id: 'together-ai' })
+    expect(readConfig()?.providers['together-ai']).toBeUndefined()
+  })
+})
