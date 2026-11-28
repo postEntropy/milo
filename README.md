@@ -31,6 +31,31 @@ of normalized `AgentEvent`s, and the gateway translates input in and events out.
 
 ## Install & run
 
+### VPS / quick install (Linux & macOS)
+
+Clones Milo from GitHub into `~/.local/share/milo` (or `/opt/milo` when run as root), builds both
+the CLI and Web UI, and installs `milo` and `milo-web` on `PATH`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/postEntropy/milo/main/install.sh | bash
+```
+
+Requirements: `git`, `npm`, and Node.js >= 22.13 (`node:sqlite`).
+
+To check the installed version + commit, pull new commits from GitHub, or migrate `~/.milo` between
+machines:
+
+```bash
+milo version                     # print package version + checked-out git commit and branch
+milo update --check              # check for new commits on origin without changing anything
+milo update                      # pull commits from GitHub and rebuild CLI + Web UI
+milo update --to <tag|commit>    # check out and build a specific commit SHA or tag
+milo export                      # back up ~/.milo (config, secrets, sessions, memory, history, skills)
+milo import milo-backup.tar.gz   # restore a backup into ~/.milo (--dry-run to inspect first)
+```
+
+### From a local checkout
+
 ```bash
 npm install
 npm run dev            # start the interactive CLI chat

@@ -44,9 +44,21 @@ describe('resolveCommand', () => {
     expect(resolveCommand('model')).toBe('model')
     expect(resolveCommand('setup')).toBe('setup')
     expect(resolveCommand('chat')).toBe('chat')
+    expect(resolveCommand('version')).toBe('version')
+    expect(resolveCommand('update')).toBe('update')
+    expect(resolveCommand('export')).toBe('export')
+    expect(resolveCommand('import')).toBe('import')
   })
 
   it('rejects anything else', () => {
     expect(resolveCommand('frobnicate')).toBeNull()
+  })
+
+  it('accepts resource flags on update, export, and import', () => {
+    expect(validateArgs(parseArgs(['update', '--check', '--branch', 'main']))).toBeNull()
+    expect(validateArgs(parseArgs(['update', '--to', 'v0.1.0']))).toBeNull()
+    expect(validateArgs(parseArgs(['export', '--all', '--no-secrets']))).toBeNull()
+    expect(validateArgs(parseArgs(['import', 'backup.tar.gz', '--dry-run', '-y']))).toBeNull()
+    expect(validateArgs(parseArgs(['import', 'backup.tar.gz', '--banana']))).toContain('Unknown option')
   })
 })

@@ -5,6 +5,7 @@ import { createRuntime } from '../core/bootstrap.js'
 import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
+import { formatInstallVersion, readInstallVersion } from '../core/version.js'
 import { bindProblem, startWebServer, webReachLines } from '../gateways/web/http.js'
 import { errorMessage } from '../util/errors.js'
 import { hyperlink, openBrowser } from '../util/terminal.js'
@@ -45,7 +46,7 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
     throw new Error(bindProblem(error, host, port))
   }
 
-  console.error(`Milo web · ${loaded.model} (${loaded.provider.id}) · mode ${runtime.permissions?.mode ?? 'ask'} · effort ${runtime.reasoningEffort} · ${runtime.skills.length} skills · browser ${runtime.browser ? 'on' : 'off'} · ${MILO_HOME}`)
+  console.error(`Milo ${formatInstallVersion(readInstallVersion())} · web · ${loaded.model} (${loaded.provider.id}) · mode ${runtime.permissions?.mode ?? 'ask'} · effort ${runtime.reasoningEffort} · ${runtime.skills.length} skills · browser ${runtime.browser ? 'on' : 'off'} · ${MILO_HOME}`)
   console.error(`Open ${hyperlink(web.url)}`)
   for (const line of webReachLines(host, web.urls)) console.error(line)
   if (options.open) void openBrowser(web.url)

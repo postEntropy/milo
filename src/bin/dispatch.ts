@@ -19,6 +19,10 @@ export type Command =
   | 'spotlight'
   | 'pair'
   | 'devices'
+  | 'version'
+  | 'update'
+  | 'export'
+  | 'import'
   | 'run'
 
 export const SERVE_USAGE = [
@@ -41,6 +45,10 @@ const RESOURCE_COMMANDS = new Set<Command>([
   'devices',
   'web',
   'spotlight',
+  'version',
+  'update',
+  'export',
+  'import',
 ])
 
 export function isResourceCommand(command: Command | null): command is Command {
@@ -54,12 +62,15 @@ export function isResourceCommand(command: Command | null): command is Command {
  */
 const RESOURCE_FLAGS: Record<string, readonly string[]> = {
   chatgpt: ['--device', '--new'],
+  export: ['--include-browser', '--include-embed', '--include-caches', '--all', '--no-secrets'],
   google: ['--access', '--client-id', '--client-secret', '--credentials'],
   history: ['--older-than', '--before', '--yes', '-y'],
+  import: ['--dry-run', '--yes', '-y', '--no-backup'],
   log: ['-f', '--follow', '--older-than', '--before', '--yes', '-y'],
   projects: ['--name', '--icon'],
   routines: ['--every', '--at', '--days', '--day-of-month', '--month', '--gateway', '--to', '--chat', '--limit', '--silent', '--name', '--yes'],
   skills: ['--skill', '-s', '--yes', '-y'],
+  update: ['--check', '--branch', '--to', '--force'],
   web: ['--no-open', '--host', '--port'],
 }
 
@@ -114,6 +125,10 @@ export function resolveCommand(command: string): Command | null {
     case 'spotlight':
     case 'pair':
     case 'devices':
+    case 'version':
+    case 'update':
+    case 'export':
+    case 'import':
     case 'run':
     case 'chat':
       return command

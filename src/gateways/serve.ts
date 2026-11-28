@@ -7,6 +7,7 @@ import { attachJobNotifier } from '../core/jobs/index.js'
 import type { OutgoingMessage } from '../core/outgoing.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
 import { DelegatedScheduler } from '../core/delegated-scheduler.js'
+import { formatInstallVersion, readInstallVersion } from '../core/version.js'
 import type { Gateway } from './types.js'
 
 export interface ServeOptions {
@@ -167,7 +168,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   }
   const routines = readRoutines().filter((routine) => routine.enabled).length
 
-  console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
+  console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')} (${formatInstallVersion(readInstallVersion())})`)
   // One line at the boundary, not one per turn: a daemon that logs every turn is
   // noise, and the turns are the users', not the operator's. The skill count is
   // here because it is otherwise invisible — the index is built once at startup,

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import process from 'node:process'
 import { statSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { render } from 'ink'
 import { configExists, loadConfig, type LoadedConfig } from '../core/config/load.js'
+import { formatInstallVersion, readInstallVersion } from '../core/version.js'
 import { errorMessage } from '../util/errors.js'
 import { enterBracketedPaste, enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
 import { mouseStdin } from '../gateways/cli/mouse.js'
@@ -18,12 +18,12 @@ import { parseArgs, type Args } from './args.js'
 import { isResourceCommand, resolveCommand, resolveInitialMode, SERVE_USAGE, validateArgs } from './dispatch.js'
 import { applyOverrides } from './overrides.js'
 
-const { version: VERSION } = createRequire(import.meta.url)('../../package.json') as {
-  version: string
+function installVersionLine(): string {
+  return formatInstallVersion(readInstallVersion())
 }
 
 function printHelp(): void {
-  console.log(`milo ${VERSION} — a multi-surface agent
+  console.log(`milo ${installVersionLine()} — a multi-surface agent
 
 Usage:
   milo                       Start the TUI chat
@@ -39,6 +39,10 @@ Usage:
   milo pair                  Let a phone in: prints a one-time code and the address to give
   milo devices               The devices paired with this Milo (list | revoke)
   milo mcp                   The external tool servers (list | check | enable | disable)
+  milo version               Print the installed version and git commit
+  milo update                Pull commits from GitHub and rebuild (--check | --branch | --to | --force)
+  milo export [path]         Export this Milo installation (~/.milo) to a .tar.gz archive
+  milo import <archive>      Restore a Milo installation from an exported archive (--dry-run | --yes)
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
   milo spotlight             Milo in a desktop popup, a keystroke away
@@ -195,6 +199,35 @@ async function main(): Promise<void> {
         process.exitCode = await runDevices(argv)
         return
       }
+      case 'version': {
+        const extra = argv.slice(1)
+        if (extra.length === 1 && (extra[0] === '--help' || extra[0] === '-h' || extra[0] === 'help')) {
+          console.log('Usage:\n  milo version   Print the installed version and git commit')
+          return
+        }
+        if (extra.length > 0) {
+          console.error(`Unknown option "${extra[0]}". Valid options: --help (-h).`)
+          process.exitCode = 1
+          return
+        }
+        console.log(installVersionLine())
+        return
+      }
+      case 'update': {
+        const { runUpdate } = await import('./update.js')
+        process.exitCode = await runUpdate(argv)
+        return
+      }
+      case 'export': {
+        const { runExport } = await import('./export.js')
+        process.exitCode = await runExport(argv)
+        return
+      }
+      case 'import': {
+        const { runImport } = await import('./import.js')
+        process.exitCode = await runImport(argv)
+        return
+      }
     }
   }
 
@@ -205,7 +238,7 @@ async function main(): Promise<void> {
   }
 
   if (args.version) {
-    console.log(VERSION)
+    console.log(installVersionLine())
     return
   }
   if (args.help) {
