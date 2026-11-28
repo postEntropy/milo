@@ -1502,6 +1502,8 @@ private struct ToolPreviewView: View {
 
     @Environment(AppModel.self) private var model
     @State private var state: LoadState = .loading
+    @Namespace private var zoom
+    @State private var open = false
 
     private enum LoadState {
         case loading
@@ -1515,11 +1517,24 @@ private struct ToolPreviewView: View {
         Group {
             switch state {
             case .ready(let image):
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 320, alignment: .leading)
-                    .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                Button {
+                    open = true
+                } label: {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: 320, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                }
+                .buttonStyle(PressableStyle())
+                .matchedTransitionSource(id: "picture", in: zoom)
+                .accessibilityLabel("Desktop window preview")
+                .accessibilityHint("Opens the picture to zoom")
+                .fullScreenCover(isPresented: $open) {
+                    PictureViewer(image: image, alt: "Desktop window preview")
+                        .navigationTransition(.zoom(sourceID: "picture", in: zoom))
+                        .presentationBackground(.clear)
+                }
             case .expired:
                 Text("Preview expired.")
                     .font(MiloTheme.Text.meta)
@@ -1544,6 +1559,8 @@ private struct ToolPreviewView: View {
     }
 
     private func load() async {
+        open = false
+        state = .loading
         guard let callId, !callId.isEmpty else {
             state = .failed
             return

@@ -72,13 +72,26 @@ struct Picture: View {
  platform's cache is what answers it.
  */
 struct PictureViewer: View {
-    let url: URL
+    let url: URL?
+    let initialImage: UIImage?
     var alt: String = ""
     @Environment(\.dismiss) private var dismiss
     @State private var read: Read = .waiting
     /// How far the picture has been pulled down, as the share of the travel that puts it
     /// away: the page behind comes back as it is pulled, and goes again if it is let go.
     @State private var pulled: CGFloat = 0
+
+    init(url: URL, alt: String = "") {
+        self.url = url
+        self.initialImage = nil
+        self.alt = alt
+    }
+
+    init(image: UIImage, alt: String = "") {
+        self.url = nil
+        self.initialImage = image
+        self.alt = alt
+    }
 
     private enum Read {
         case waiting
@@ -109,29 +122,37 @@ struct PictureViewer: View {
 
     @ViewBuilder
     private var content: some View {
-        switch read {
-        case .waiting:
-            ProgressView()
-                .controlSize(.large)
-                .tint(.white)
-        case .failed:
-            Text("That picture could not be opened.")
-                .font(MiloTheme.Text.base)
-                .foregroundStyle(.white.opacity(0.75))
-                .multilineTextAlignment(.center)
-                .padding(MiloTheme.margin)
-        case .picture(let picture):
-            ZoomingPicture(
-                image: picture,
-                onPull: pulled(by:),
-                onSettle: { withAnimation(.easeOut(duration: 0.32)) { pulled = 0 } },
-                onLeave: { withAnimation(.easeOut(duration: 0.3)) { pulled = 1 } },
-                onTap: { dismiss() },
-                onGone: gone
-            )
-            .ignoresSafeArea()
-            .accessibilityLabel(alt.isEmpty ? "Picture" : alt)
+        if let initialImage {
+            zoomView(for: initialImage)
+        } else {
+            switch read {
+            case .waiting:
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+            case .failed:
+                Text("That picture could not be opened.")
+                    .font(MiloTheme.Text.base)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .padding(MiloTheme.margin)
+            case .picture(let picture):
+                zoomView(for: picture)
+            }
         }
+    }
+
+    private func zoomView(for picture: UIImage) -> some View {
+        ZoomingPicture(
+            image: picture,
+            onPull: pulled(by:),
+            onSettle: { withAnimation(.easeOut(duration: 0.32)) { pulled = 0 } },
+            onLeave: { withAnimation(.easeOut(duration: 0.3)) { pulled = 1 } },
+            onTap: { dismiss() },
+            onGone: gone
+        )
+        .ignoresSafeArea()
+        .accessibilityLabel(alt.isEmpty ? "Picture" : alt)
     }
 
     /// The picture follows the hand exactly: what is animated is only the way back, and the
@@ -149,6 +170,14 @@ struct PictureViewer: View {
     }
 
     private func load() async {
+        if let initialImage {
+            read = .picture(initialImage)
+            return
+        }
+        guard let url else {
+            read = .failed
+            return
+        }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let status = (response as? HTTPURLResponse)?.statusCode,

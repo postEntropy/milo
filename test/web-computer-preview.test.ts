@@ -407,5 +407,15 @@ describe('web computer preview scope and CSP', () => {
     expect(appSource).not.toContain('<article className="message assistant"><Permissions')
     expect(permissionsSource).toContain('toolApprovalTitle')
     expect(permissionsSource).not.toContain('Milo wants to run')
+
+    // Computer Use preview thumbnails open full-size on click/tap in both Web and iOS.
+    const messageListSource = readFileSync(path.join(process.cwd(), 'web/src/chat/MessageList.tsx'), 'utf8')
+    expect(messageListSource).toContain('className="tool-preview-btn"')
+    expect(messageListSource).toContain('<ImageViewer src={state.url} name="Desktop window preview"')
+
+    const iosRowSource = readFileSync(path.join(process.cwd(), 'ios/Sources/Milo/Support/MessageRow.swift'), 'utf8')
+    const iosViewerSource = readFileSync(path.join(process.cwd(), 'ios/Sources/Milo/Support/PictureViewer.swift'), 'utf8')
+    expect(iosRowSource).toContain('PictureViewer(image: image, alt: "Desktop window preview")')
+    expect(iosViewerSource).toContain('init(image: UIImage, alt: String = "")')
   })
 })

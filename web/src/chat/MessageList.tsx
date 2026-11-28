@@ -186,8 +186,11 @@ function ToolPreview({ id, callId, sessionId, width, height }: { id: string; cal
     | { kind: 'decode-error' }
     | { kind: 'error' }
   >({ kind: 'loading' })
+  const [open, setOpen] = useState(false)
+  const close = useCallback((): void => setOpen(false), [])
 
   useEffect(() => {
+    setOpen(false)
     if (!callId || !sessionId) {
       setState({ kind: 'error' })
       return
@@ -226,14 +229,28 @@ function ToolPreview({ id, callId, sessionId, width, height }: { id: string; cal
   return (
     <div className="tool-result tool-preview">
       {state.kind === 'ready' ? (
-        <img
-          className="tool-preview-img"
-          src={state.url}
-          width={width}
-          height={height}
-          alt="Desktop window preview"
-          onError={() => setState({ kind: 'decode-error' })}
-        />
+        <>
+          <button
+            className="tool-preview-btn"
+            type="button"
+            title="Open desktop window preview"
+            aria-label="Open desktop window preview"
+            onClick={() => setOpen(true)}
+          >
+            <img
+              className="tool-preview-img"
+              src={state.url}
+              width={width}
+              height={height}
+              alt="Desktop window preview"
+              onError={() => {
+                setOpen(false)
+                setState({ kind: 'decode-error' })
+              }}
+            />
+          </button>
+          {open && <ImageViewer src={state.url} name="Desktop window preview" onClose={close} />}
+        </>
       ) : state.kind === 'expired' ? (
         <div className="tool-preview-note" role="status">Preview expired.</div>
       ) : state.kind === 'decode-error' ? (
