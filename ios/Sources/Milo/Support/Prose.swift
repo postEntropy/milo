@@ -614,6 +614,7 @@ struct CodeBlock: View {
     let language: String?
     let code: String
     @State private var copied = false
+    @State private var wrapped = false
     @State private var highlighted = Highlighted()
 
     private final class Highlighted {
@@ -638,38 +639,49 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             head
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(highlighted.text(for: code, language: language))
-                    .font(MiloTheme.Text.mono)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, MiloTheme.Space.three)
-                    .padding(.top, MiloTheme.Space.one)
-                    .padding(.bottom, MiloTheme.Space.three)
+            if wrapped {
+                codeText
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    codeText
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // A sideways scroll view is greedy: offered more height than the code needs it takes
+                // it, and the block grows a row of empty ground under its last line. This pins it to
+                // the height of the code itself.
+                .fixedSize(horizontal: false, vertical: true)
+                .marksSidewaysDrag()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // A sideways scroll view is greedy: offered more height than the code needs it takes
-            // it, and the block grows a row of empty ground under its last line. This pins it to
-            // the height of the code itself.
-            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .miloGlassCard(radius: MiloTheme.Radius.md)
-        .marksSidewaysDrag()
         // The tap that says the words are on the clipboard. It fires on the copy itself and not
         // again when the checkmark lets go two seconds later, which a bare flag would do.
         .sensoryFeedback(.success, trigger: copied, condition: { _, copied in copied })
+        .sensoryFeedback(.selection, trigger: wrapped)
     }
 
-    /// The block's own bar: what the fence named, at the leading edge, and the control that
-    /// copies it at the trailing one. No rule under it — the code below is the same surface,
-    /// and a line there would be a border between two halves of one thing.
+    private var codeText: some View {
+        Text(highlighted.text(for: code, language: language))
+            .font(MiloTheme.Text.mono)
+            .foregroundStyle(MiloTheme.foreground)
+            .textSelection(.enabled)
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.top, MiloTheme.Space.one)
+            .padding(.bottom, MiloTheme.Space.three)
+    }
+
+    /// The block's own bar: what the fence named, at the leading edge, and the controls that
+    /// wrap or copy it at the trailing one. No rule under it — the code below is the same
+    /// surface, and a line there would be a border between two halves of one thing.
     private var head: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: MiloTheme.Space.two) {
             Text(name)
                 .font(MiloTheme.Text.meta)
                 .foregroundStyle(MiloTheme.mutedStrong)
             Spacer(minLength: 0)
+            wrapControl
             copyControl
         }
         .padding(.top, MiloTheme.Space.two)
@@ -678,23 +690,46 @@ struct CodeBlock: View {
         .padding(.trailing, MiloTheme.Space.two)
     }
 
+    private var wrapControl: some View {
+        headButton(
+            icon: "arrow.turn.down.left",
+            active: wrapped,
+            label: wrapped ? "Unwrap lines" : "Wrap lines"
+        ) {
+            wrapped.toggle()
+        }
+    }
+
     private var copyControl: some View {
-        Button {
+        headButton(
+            icon: copied ? "checkmark" : "doc.on.doc",
+            active: false,
+            label: copied ? "Copied" : "Copy the code"
+        ) {
             UIPasteboard.general.string = code
             copied = true
             Task {
                 try? await Task.sleep(for: .seconds(2))
                 copied = false
             }
-        } label: {
-            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+        }
+    }
+
+    private func headButton(
+        icon: String,
+        active: Bool,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MiloTheme.mutedStrong)
+                .foregroundStyle(active ? MiloTheme.foreground : MiloTheme.mutedStrong)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(MiloTheme.foreground.opacity(0.08)))
+                .background(Circle().fill(MiloTheme.foreground.opacity(active ? 0.18 : 0.08)))
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
-        .accessibilityLabel(copied ? "Copied" : "Copy the code")
+        .accessibilityLabel(label)
     }
 }
