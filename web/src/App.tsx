@@ -683,6 +683,7 @@ export default function App() {
       // The rest of a session too long for the handshake: whole rows, in the order they
       // happened. They go under the running turn's own row when the handshake opened one,
       // so the turn stays at the end where it is being written.
+      pinToEnd.current = true
       setMessages((current) => {
         const loaded = current.filter((message) => message.loaded).length
         const rows: ChatMessage[] = frame.messages.map((message, offset) => ({
